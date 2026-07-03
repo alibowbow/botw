@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Wilderland — Breath of the Top-Down</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🗡️</text></svg>" />
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="game"></canvas>
+    <div id="loading">Generating Wilderland…</div>
+    <div id="hint">WASD move · Shift sprint · J attack · E interact · M map · Esc pause</div>
+  </div>
+  <!-- core -->
+  <script src="js/core/util.js"></script>
+  <script src="js/core/rng.js"></script>
+  <script src="js/core/input.js"></script>
+  <script src="js/core/audio.js"></script>
+  <script src="js/core/sprites.js"></script>
+  <!-- world -->
+  <script src="js/world/tiles.js"></script>
+  <script src="js/world/worldgen.js"></script>
+  <script src="js/world/world.js"></script>
+  <!-- entities -->
+  <script src="js/entities/weapons.js"></script>
+  <script src="js/entities/particle.js"></script>
+  <script src="js/entities/projectile.js"></script>
+  <script src="js/entities/player.js"></script>
+  <script src="js/entities/enemy.js"></script>
+  <script src="js/entities/pickup.js"></script>
+  <!-- systems -->
+  <script src="js/systems/daynight.js"></script>
+  <script src="js/systems/spawner.js"></script>
+  <!-- ui -->
+  <script src="js/ui/hud.js"></script>
+  <script src="js/ui/minimap.js"></script>
+  <script src="js/ui/menus.js"></script>
+  <!-- game -->
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

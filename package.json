@@ -1,0 +1,16 @@
+{
+  "name": "wilderland",
+  "version": "1.0.0",
+  "description": "Wilderland — a Legend of Zelda: Breath of the Wild-inspired top-down action game that runs in the browser with zero dependencies.",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "serve": "node server.js 8080",
+    "build": "node scripts/build.js",
+    "test": "node scripts/smoketest.js",
+    "test:features": "node scripts/featuretest.js"
+  },
+  "keywords": ["game", "zelda", "breath-of-the-wild", "top-down", "canvas", "html5", "javascript"],
+  "license": "MIT",
+  "private": true
+}
