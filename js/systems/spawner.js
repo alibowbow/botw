@@ -21,15 +21,24 @@ class Spawner {
         camp.enemies = [];
         const night = game.dayNight.night > 0.5;
         for (let i = 0; i < camp.size; i++) {
-          const a = i / camp.size * TAU + Math.random();
-          const ex = camp.x + Math.cos(a) * rand(18, 40);
-          const ey = camp.y + Math.sin(a) * rand(18, 40);
+          // find a walkable offset around the campfire (never in water/solids)
+          let ex = camp.x, ey = camp.y;
+          for (let tryp = 0; tryp < 8; tryp++) {
+            const a = i / camp.size * TAU + Math.random();
+            const rr = rand(18, 40);
+            const cx = camp.x + Math.cos(a) * rr, cy = camp.y + Math.sin(a) * rr;
+            const ti = game.world.tileInfoAtWorld(cx, cy);
+            if (!ti.solid && !ti.deep) { ex = cx; ey = cy; break; }
+          }
           let kind = 'bokoblin';
           if (night && Math.random() < 0.4) kind = 'bokoblin_blue';
           if (Math.random() < 0.18) kind = 'octorok';
           const e = game.spawnEnemy(ex, ey, kind);
           if (e) { e.hx = ex; e.hy = ey; e.camp = camp; camp.enemies.push(e); }
         }
+        // If nothing spawned (global cap saturated), don't lock the camp as
+        // "spawned but empty" — let it retry later.
+        if (camp.enemies.length === 0) camp.spawned = false;
       }
       if (camp.spawned && !camp.cleared) {
         const anyAlive = camp.enemies.some(e => e.alive);

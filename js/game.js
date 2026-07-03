@@ -38,10 +38,21 @@ class Game {
     this.snowFlakes = [];
 
     this.resize();
-    this._newWorld(this._randomSeed(), true);
+    // Resume the saved world if there is one, otherwise roll a fresh seed.
+    const savedSeed = this._savedSeed();
+    this._newWorld(savedSeed !== null ? savedSeed : this._randomSeed(), true);
   }
 
   _randomSeed() { return Math.floor((performance.now() * 1000) % 2147483647) ^ (this._seedSalt = (this._seedSalt || 12345) * 16807 % 2147483647); }
+
+  _savedSeed() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      return (typeof d.seed === 'number' && isFinite(d.seed)) ? d.seed : null;
+    } catch (e) { return null; }
+  }
 
   _newWorld(seed, tryLoad) {
     const data = generateWorld(seed);
@@ -169,9 +180,10 @@ class Game {
 
   _bloodMoon() {
     this.toast('The Blood Moon revives fallen foes...');
+    // Kill existing wanderers AND camp members first, so resetting the camps
+    // doesn't orphan still-living foes and double the population.
+    for (const e of this.enemies) if (e.isWanderer || e.camp) { e.state = 'dead'; e.deadT = 0; }
     for (const camp of this.world.structures.camps) { camp.spawned = false; camp.cleared = false; camp.enemies = []; }
-    // clear wanderers so they respawn fresh
-    for (const e of this.enemies) if (e.isWanderer) { e.state = 'dead'; e.deadT = 0; }
     this.shake(6);
   }
 

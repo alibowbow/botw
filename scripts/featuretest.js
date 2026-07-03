@@ -16,7 +16,22 @@ const path = require('path');
   await page.keyboard.press('Enter');
   await page.waitForTimeout(200);
 
-  const tp = (x, y) => page.evaluate(([x, y]) => { GAME.player.x = x; GAME.player.y = y; GAME.player.kbx = GAME.player.kby = 0; GAME._centerCamera(); }, [x, y]);
+  // Teleport to a guaranteed-walkable spot within interaction range of (x,y).
+  // (In real play the player walks up on foot, so is always on walkable ground.)
+  const tp = (x, y) => page.evaluate(([x, y]) => {
+    const w = GAME.world;
+    const cand = [[0, -18], [0, 18], [-18, 0], [18, 0], [-14, -14], [14, -14], [-14, 14], [14, 14], [0, -12], [-12, 0], [0, 0]];
+    let px = x, py = y;
+    for (const [dx, dy] of cand) {
+      const t = w.tileInfoAtWorld(x + dx, y + dy);
+      if (!t.deep && !t.solid) { px = x + dx; py = y + dy; break; }
+    }
+    const p = GAME.player;
+    p.x = px; p.y = py; p.state = 'normal'; p.kbx = p.kby = 0; p.glideT = 0;
+    GAME._centerCamera();
+  }, [x, y]);
+  // Exact teleport (no walkable search) for swim/climb tests that need a specific tile.
+  const tpRaw = (x, y) => page.evaluate(([x, y]) => { const p = GAME.player; p.x = x; p.y = y; p.state = 'normal'; p.kbx = p.kby = 0; GAME._centerCamera(); }, [x, y]);
   const pressE = async () => { await page.keyboard.press('KeyE'); await page.waitForTimeout(120); };
   const results = {};
 
@@ -60,7 +75,7 @@ const path = require('path');
     for (let i = 0; i < w.tiles.length; i++) if (w.tiles[i] === 0) { const tx = i % w.W, ty = Math.floor(i / w.W); return { x: tx * 16 + 8, y: ty * 16 + 8 }; }
     return null;
   });
-  if (dw) { await tp(dw.x, dw.y); await page.waitForTimeout(200); results.swim = await page.evaluate(() => GAME.player.state); }
+  if (dw) { await tpRaw(dw.x, dw.y); await page.waitForTimeout(200); results.swim = await page.evaluate(() => GAME.player.state); }
 
   // CLIMB: find a cliff tile with a walkable neighbor to its left
   const cliff = await page.evaluate(() => {
@@ -75,7 +90,7 @@ const path = require('path');
     return null;
   });
   if (cliff) {
-    await tp(cliff.px, cliff.py); await page.waitForTimeout(80);
+    await tpRaw(cliff.px, cliff.py); await page.waitForTimeout(80);
     await page.keyboard.down('KeyD'); await page.waitForTimeout(500); await page.keyboard.up('KeyD');
     results.climb = await page.evaluate(() => ({ state: GAME.player.state, stamina: GAME.player.stamina.toFixed(2) }));
     await page.evaluate(() => { GAME.player.state = 'normal'; });
@@ -121,7 +136,7 @@ const path = require('path');
   if (!results.korok.done) fail.push('korok not lifted');
   if (results.cook.cooked < 1) fail.push('cooking failed');
   if (results.swim && results.swim !== 'swim') fail.push('swim state not entered (' + results.swim + ')');
-  if (results.climb && results.climb.state !== 'climb' && results.climb.state !== 'normal') fail.push('climb weird state');
+  if (results.climb && !(results.climb.state === 'climb' || parseFloat(results.climb.stamina) < 0.99)) fail.push('climb did not engage (' + JSON.stringify(results.climb) + ')');
   if (results.bow.projectiles < 1) fail.push('bow did not fire');
   console.log(fail.length ? ('RESULT: FAIL -> ' + fail.join(', ')) : 'RESULT: PASS');
   process.exit(fail.length ? 1 : 0);

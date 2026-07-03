@@ -35,6 +35,7 @@ class Player {
     this.attackT = 0;      // remaining swing time
     this.attackCd = 0;
     this.swingArc = 0;     // animated swing angle offset
+    this.swingWeapon = null; // weapon reference locked in for the current swing
     this.hitSet = null;    // enemies already hit this swing
     this.kbx = 0; this.kby = 0; // knockback velocity
 
@@ -131,10 +132,18 @@ class Player {
       if (moving && ((this.walkPhase % 1) < dt * 6)) game.audio.play('climb');
       // exit conditions
       if (this.stamina <= 0.001) {
-        // fall off: shove away from cliff
+        // fall off: retreat back the way we climbed until on safe (non-cliff)
+        // ground, so we never get left embedded inside a thick cliff band.
         this.state = 'normal';
-        this.kbx = -face.x * 120; this.kby = -face.y * 120;
-        this.damage(0.5, -face.x, -face.y, game, true);
+        let bx = this.x, by = this.y;
+        for (let s = 0; s < 24; s++) {
+          const ti = game.world.tileInfoAtWorld(bx, by);
+          if (!ti.climb && !ti.solid && !ti.deep) break;
+          bx -= face.x * 3; by -= face.y * 3;
+        }
+        this.x = bx; this.y = by;
+        this.kbx = 0; this.kby = 0;
+        this.damage(0.5, 0, 0, game, true);
         game.toast('Out of stamina!');
       } else if (!onCliffNow && !stillAdjacent) {
         this.state = 'normal';
@@ -245,6 +254,9 @@ class Player {
     if ((this.glideT <= 0 && groundOK) || (wantLand && groundOK)) {
       this.state = 'normal';
       game.particles.dustRing(this.x, this.y + 4);
+      // Consume the land press so the same edge can't also fire an interaction
+      // (e.g. re-launching the glide) later this frame.
+      if (wantLand) input.consume('KeyE', 'Space');
     } else if (this.glideT <= -6) {
       // forced landing (nudge to nearest walkable)
       this.state = 'normal';
@@ -288,6 +300,7 @@ class Player {
     this.attackCd = w.swing + 0.08;
     this.hitSet = new Set();
     this.swingArc = -w.arc / 2;
+    this.swingWeapon = w; // lock stats for this swing even if the weapon breaks now
     game.audio.play('swing');
     // durability
     if (w.type !== 'fists' && isFinite(w.dur)) {
@@ -303,7 +316,7 @@ class Player {
   }
 
   _applyAttack(game) {
-    const w = this.weapon;
+    const w = this.swingWeapon || this.weapon;
     const t = 1 - this.attackT / w.swing; // 0..1 through swing
     this.swingArc = lerp(-w.arc / 2, w.arc / 2, t);
     const ang = this.aim;
@@ -511,7 +524,7 @@ class Player {
 
     // weapon swing arc
     if (this.attackT > 0) {
-      const w = this.weapon;
+      const w = this.swingWeapon || this.weapon;
       // draw relative to un-flipped space using aim; simplest: draw a slash arc in facing
       ctx.save();
       // aim relative to sprite: if flipped we already scaled; approximate by facing

@@ -326,6 +326,8 @@ class Input {
   isDown(...codes) { for (const c of codes) if (this.down[c]) return true; return false; }
   wasPressed(...codes) { for (const c of codes) if (this.pressed[c]) return true; return false; }
   wasReleased(...codes) { for (const c of codes) if (this.released[c]) return true; return false; }
+  // Clear a pressed edge so no later consumer in the same frame reacts to it.
+  consume(...codes) { for (const c of codes) this.pressed[c] = false; }
 
   // Movement vector from WASD / arrows (normalized on the diagonal).
   moveVector() {
@@ -1040,6 +1042,20 @@ function generateWorld(seed) {
       }
     }
   }
+  // Fallback: if no grass was found near centre, spiral outward for the nearest
+  // walkable tile rather than trusting the untested centre cell (could be water).
+  if (!isWalkTile(spawnTX, spawnTY)) {
+    const ccx = Math.floor(cx), ccy = Math.floor(cy);
+    let found = false;
+    for (let rad = 1; rad < Math.max(W, H) && !found; rad++) {
+      for (let dy = -rad; dy <= rad && !found; dy++) {
+        for (let dx = -rad; dx <= rad && !found; dx++) {
+          if (Math.abs(dx) !== rad && Math.abs(dy) !== rad) continue; // ring only
+          if (isWalkTile(ccx + dx, ccy + dy)) { spawnTX = ccx + dx; spawnTY = ccy + dy; found = true; }
+        }
+      }
+    }
+  }
   const spawn = { x: spawnTX * TILE + TILE / 2, y: spawnTY * TILE + TILE / 2 };
 
   const objects = [];
@@ -1197,8 +1213,8 @@ function generateWorld(seed) {
         else if (r < 0.30) objects.push({ type: 'grass', x: wx, y: wy, v: rng.int(0, 2), solid: false, cut: true });
         else if (r < 0.33) objects.push({ type: 'rock', x: wx, y: wy, v: rng.int(0, 2), solid: true, r: 5 });
       } else if (t === T.FLOWERS) {
-        if (r < 0.5) objects.push({ type: 'flower', x: wx, y: wy, v: rng.int(0, 2), solid: false });
-        else if (r < 0.62) objects.push({ type: 'grass', x: wx, y: wy, v: rng.int(0, 2), solid: false, cut: true });
+        if (r < 0.26) objects.push({ type: 'flower', x: wx, y: wy, v: rng.int(0, 2), solid: false });
+        else if (r < 0.44) objects.push({ type: 'grass', x: wx, y: wy, v: rng.int(0, 2), solid: false, cut: true });
       } else if (t === T.SAND) {
         if (r < 0.05) objects.push({ type: 'rock', x: wx, y: wy, v: rng.int(0, 2), solid: true, r: 5 });
         else if (r < 0.07) objects.push({ type: 'bush', x: wx, y: wy, v: rng.int(0, 2), solid: false, r: 4 });
@@ -1340,6 +1356,10 @@ class World {
     opts = opts || {};
     if (opts.deepSolid === undefined) opts.deepSolid = true;
     if (opts.cliffSolid === undefined) opts.cliffSolid = true;
+    // If we start already embedded in a solid (e.g. a climber whose stamina ran
+    // out inside a cliff band, or an enemy that spawned badly), nudge free first
+    // so the entity can never get permanently frozen.
+    if (this._blocked(x, y, r, opts)) { const esc = this._unstick(x, y, r, opts); x = esc.x; y = esc.y; }
     let hitX = false, hitY = false;
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / (r * 0.5 || 4)));
     const sx = dx / steps, sy = dy / steps;
@@ -1354,6 +1374,19 @@ class World {
       }
     }
     return { x, y, hitX, hitY };
+  }
+
+  // Find the nearest non-blocked position by spiralling outward. Returns the
+  // original position if nothing free is found within range.
+  _unstick(x, y, r, opts) {
+    for (let rad = 2; rad <= 28; rad += 2) {
+      for (let a = 0; a < 8; a++) {
+        const ang = a / 8 * TAU;
+        const nx = x + Math.cos(ang) * rad, ny = y + Math.sin(ang) * rad;
+        if (!this._blocked(nx, ny, r, opts)) return { x: nx, y: ny };
+      }
+    }
+    return { x, y };
   }
 
   // True if a straight sample point is inside a solid (used by projectiles).
@@ -1433,7 +1466,10 @@ class World {
 
   // Push visible objects into arr as render entries {y, kind:'obj', o}.
   collectVisibleObjects(view, arr) {
-    const pad = 48;
+    // Objects are drawn upward from their feet, so a tall sprite (the 96px tower)
+    // can still be on-screen when its feet are well below the view. Pad enough to
+    // cover the tallest sprite so nothing pops out at the edges.
+    const pad = 110;
     this.forEachObjectIn(view.x - pad, view.y - pad, view.x + view.w + pad, view.y + view.h + pad, (o) => {
       if (o.dead) return;
       arr.push({ sortY: o.y, kind: 'obj', o });
@@ -1704,6 +1740,7 @@ class Player {
     this.attackT = 0;      // remaining swing time
     this.attackCd = 0;
     this.swingArc = 0;     // animated swing angle offset
+    this.swingWeapon = null; // weapon reference locked in for the current swing
     this.hitSet = null;    // enemies already hit this swing
     this.kbx = 0; this.kby = 0; // knockback velocity
 
@@ -1800,10 +1837,18 @@ class Player {
       if (moving && ((this.walkPhase % 1) < dt * 6)) game.audio.play('climb');
       // exit conditions
       if (this.stamina <= 0.001) {
-        // fall off: shove away from cliff
+        // fall off: retreat back the way we climbed until on safe (non-cliff)
+        // ground, so we never get left embedded inside a thick cliff band.
         this.state = 'normal';
-        this.kbx = -face.x * 120; this.kby = -face.y * 120;
-        this.damage(0.5, -face.x, -face.y, game, true);
+        let bx = this.x, by = this.y;
+        for (let s = 0; s < 24; s++) {
+          const ti = game.world.tileInfoAtWorld(bx, by);
+          if (!ti.climb && !ti.solid && !ti.deep) break;
+          bx -= face.x * 3; by -= face.y * 3;
+        }
+        this.x = bx; this.y = by;
+        this.kbx = 0; this.kby = 0;
+        this.damage(0.5, 0, 0, game, true);
         game.toast('Out of stamina!');
       } else if (!onCliffNow && !stillAdjacent) {
         this.state = 'normal';
@@ -1914,6 +1959,9 @@ class Player {
     if ((this.glideT <= 0 && groundOK) || (wantLand && groundOK)) {
       this.state = 'normal';
       game.particles.dustRing(this.x, this.y + 4);
+      // Consume the land press so the same edge can't also fire an interaction
+      // (e.g. re-launching the glide) later this frame.
+      if (wantLand) input.consume('KeyE', 'Space');
     } else if (this.glideT <= -6) {
       // forced landing (nudge to nearest walkable)
       this.state = 'normal';
@@ -1957,6 +2005,7 @@ class Player {
     this.attackCd = w.swing + 0.08;
     this.hitSet = new Set();
     this.swingArc = -w.arc / 2;
+    this.swingWeapon = w; // lock stats for this swing even if the weapon breaks now
     game.audio.play('swing');
     // durability
     if (w.type !== 'fists' && isFinite(w.dur)) {
@@ -1972,7 +2021,7 @@ class Player {
   }
 
   _applyAttack(game) {
-    const w = this.weapon;
+    const w = this.swingWeapon || this.weapon;
     const t = 1 - this.attackT / w.swing; // 0..1 through swing
     this.swingArc = lerp(-w.arc / 2, w.arc / 2, t);
     const ang = this.aim;
@@ -2180,7 +2229,7 @@ class Player {
 
     // weapon swing arc
     if (this.attackT > 0) {
-      const w = this.weapon;
+      const w = this.swingWeapon || this.weapon;
       // draw relative to un-flipped space using aim; simplest: draw a slash arc in facing
       ctx.save();
       // aim relative to sprite: if flipped we already scaled; approximate by facing
@@ -2557,7 +2606,7 @@ class DayNight {
     this.time = startHour === undefined ? 8 : startHour; // hours 0..24
     this.day = 1;
     this.bloodMoon = 0;           // 0..1 intensity
-    this._bloodFired = false;
+    this._lastBloodDay = -1;      // day value the event last fired on (latch)
     this.onBloodMoon = null;
   }
 
@@ -2571,13 +2620,14 @@ class DayNight {
     const inWindow = (this.time >= 23.2 || this.time <= 0.6);
     if (isBloodNight && inWindow) {
       this.bloodMoon = Math.min(1, this.bloodMoon + dt * 0.5);
-      if (this.bloodMoon > 0.85 && !this._bloodFired) {
-        this._bloodFired = true;
+      // Day 3's window spans two midnights (start and end of the same day),
+      // so latch on the day value to fire the event exactly once per blood night.
+      if (this.bloodMoon > 0.85 && this._lastBloodDay !== this.day) {
+        this._lastBloodDay = this.day;
         if (this.onBloodMoon) this.onBloodMoon();
       }
     } else {
       this.bloodMoon = Math.max(0, this.bloodMoon - dt * 0.5);
-      if (!inWindow) this._bloodFired = false;
     }
   }
 
@@ -2644,15 +2694,24 @@ class Spawner {
         camp.enemies = [];
         const night = game.dayNight.night > 0.5;
         for (let i = 0; i < camp.size; i++) {
-          const a = i / camp.size * TAU + Math.random();
-          const ex = camp.x + Math.cos(a) * rand(18, 40);
-          const ey = camp.y + Math.sin(a) * rand(18, 40);
+          // find a walkable offset around the campfire (never in water/solids)
+          let ex = camp.x, ey = camp.y;
+          for (let tryp = 0; tryp < 8; tryp++) {
+            const a = i / camp.size * TAU + Math.random();
+            const rr = rand(18, 40);
+            const cx = camp.x + Math.cos(a) * rr, cy = camp.y + Math.sin(a) * rr;
+            const ti = game.world.tileInfoAtWorld(cx, cy);
+            if (!ti.solid && !ti.deep) { ex = cx; ey = cy; break; }
+          }
           let kind = 'bokoblin';
           if (night && Math.random() < 0.4) kind = 'bokoblin_blue';
           if (Math.random() < 0.18) kind = 'octorok';
           const e = game.spawnEnemy(ex, ey, kind);
           if (e) { e.hx = ex; e.hy = ey; e.camp = camp; camp.enemies.push(e); }
         }
+        // If nothing spawned (global cap saturated), don't lock the camp as
+        // "spawned but empty" — let it retry later.
+        if (camp.enemies.length === 0) camp.spawned = false;
       }
       if (camp.spawned && !camp.cleared) {
         const anyAlive = camp.enemies.some(e => e.alive);
@@ -2812,7 +2871,7 @@ class HUD {
     const icon = g.sprites.icon[w.icon];
     if (icon) ctx.drawImage(icon, x + 8, y + 12, 22, 22);
     ctx.font = '11px monospace'; ctx.textAlign = 'left'; ctx.fillStyle = '#e8eef2';
-    ctx.fillText(w.name.length > 16 ? w.name.slice(0, 15) + '…' : w.name, x + 36, y + 18);
+    ctx.fillText(w.name.length > 14 ? w.name.slice(0, 13) + '…' : w.name, x + 36, y + 18);
     ctx.fillStyle = '#9fb8c8'; ctx.fillText('ATK ' + w.dmg, x + 36, y + 33);
     // durability bar
     if (isFinite(w.maxDur)) {
@@ -2822,8 +2881,9 @@ class HUD {
       ctx.fillStyle = frac > 0.4 ? '#7bd24a' : (frac > 0.18 ? '#e8c23a' : '#e0483a');
       ctx.fillRect(bx, by, bw * frac, 3);
     }
-    // weapon count / cycle hint
-    if (p.weapons.length > 1) { ctx.fillStyle = '#7f98a8'; ctx.textAlign = 'right'; ctx.fillText(`[Q] ${p.wi + 1}/${p.weapons.length}`, x + 144, y + 18); }
+    // weapon count / cycle hint (on the ATK line, right-aligned, so it never
+    // collides with the weapon name above it)
+    if (p.weapons.length > 1) { ctx.fillStyle = '#7f98a8'; ctx.textAlign = 'right'; ctx.fillText(`[Q] ${p.wi + 1}/${p.weapons.length}`, x + 144, y + 33); }
   }
 
   _temperature(ctx, g, p, W, H) {
@@ -3277,10 +3337,21 @@ class Game {
     this.snowFlakes = [];
 
     this.resize();
-    this._newWorld(this._randomSeed(), true);
+    // Resume the saved world if there is one, otherwise roll a fresh seed.
+    const savedSeed = this._savedSeed();
+    this._newWorld(savedSeed !== null ? savedSeed : this._randomSeed(), true);
   }
 
   _randomSeed() { return Math.floor((performance.now() * 1000) % 2147483647) ^ (this._seedSalt = (this._seedSalt || 12345) * 16807 % 2147483647); }
+
+  _savedSeed() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      return (typeof d.seed === 'number' && isFinite(d.seed)) ? d.seed : null;
+    } catch (e) { return null; }
+  }
 
   _newWorld(seed, tryLoad) {
     const data = generateWorld(seed);
@@ -3408,9 +3479,10 @@ class Game {
 
   _bloodMoon() {
     this.toast('The Blood Moon revives fallen foes...');
+    // Kill existing wanderers AND camp members first, so resetting the camps
+    // doesn't orphan still-living foes and double the population.
+    for (const e of this.enemies) if (e.isWanderer || e.camp) { e.state = 'dead'; e.deadT = 0; }
     for (const camp of this.world.structures.camps) { camp.spawned = false; camp.cleared = false; camp.enemies = []; }
-    // clear wanderers so they respawn fresh
-    for (const e of this.enemies) if (e.isWanderer) { e.state = 'dead'; e.deadT = 0; }
     this.shake(6);
   }
 

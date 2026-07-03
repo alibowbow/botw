@@ -85,7 +85,7 @@ class HUD {
     const icon = g.sprites.icon[w.icon];
     if (icon) ctx.drawImage(icon, x + 8, y + 12, 22, 22);
     ctx.font = '11px monospace'; ctx.textAlign = 'left'; ctx.fillStyle = '#e8eef2';
-    ctx.fillText(w.name.length > 16 ? w.name.slice(0, 15) + '…' : w.name, x + 36, y + 18);
+    ctx.fillText(w.name.length > 14 ? w.name.slice(0, 13) + '…' : w.name, x + 36, y + 18);
     ctx.fillStyle = '#9fb8c8'; ctx.fillText('ATK ' + w.dmg, x + 36, y + 33);
     // durability bar
     if (isFinite(w.maxDur)) {
@@ -95,8 +95,9 @@ class HUD {
       ctx.fillStyle = frac > 0.4 ? '#7bd24a' : (frac > 0.18 ? '#e8c23a' : '#e0483a');
       ctx.fillRect(bx, by, bw * frac, 3);
     }
-    // weapon count / cycle hint
-    if (p.weapons.length > 1) { ctx.fillStyle = '#7f98a8'; ctx.textAlign = 'right'; ctx.fillText(`[Q] ${p.wi + 1}/${p.weapons.length}`, x + 144, y + 18); }
+    // weapon count / cycle hint (on the ATK line, right-aligned, so it never
+    // collides with the weapon name above it)
+    if (p.weapons.length > 1) { ctx.fillStyle = '#7f98a8'; ctx.textAlign = 'right'; ctx.fillText(`[Q] ${p.wi + 1}/${p.weapons.length}`, x + 144, y + 33); }
   }
 
   _temperature(ctx, g, p, W, H) {

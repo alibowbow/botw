@@ -118,6 +118,10 @@ class World {
     opts = opts || {};
     if (opts.deepSolid === undefined) opts.deepSolid = true;
     if (opts.cliffSolid === undefined) opts.cliffSolid = true;
+    // If we start already embedded in a solid (e.g. a climber whose stamina ran
+    // out inside a cliff band, or an enemy that spawned badly), nudge free first
+    // so the entity can never get permanently frozen.
+    if (this._blocked(x, y, r, opts)) { const esc = this._unstick(x, y, r, opts); x = esc.x; y = esc.y; }
     let hitX = false, hitY = false;
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / (r * 0.5 || 4)));
     const sx = dx / steps, sy = dy / steps;
@@ -132,6 +136,19 @@ class World {
       }
     }
     return { x, y, hitX, hitY };
+  }
+
+  // Find the nearest non-blocked position by spiralling outward. Returns the
+  // original position if nothing free is found within range.
+  _unstick(x, y, r, opts) {
+    for (let rad = 2; rad <= 28; rad += 2) {
+      for (let a = 0; a < 8; a++) {
+        const ang = a / 8 * TAU;
+        const nx = x + Math.cos(ang) * rad, ny = y + Math.sin(ang) * rad;
+        if (!this._blocked(nx, ny, r, opts)) return { x: nx, y: ny };
+      }
+    }
+    return { x, y };
   }
 
   // True if a straight sample point is inside a solid (used by projectiles).
@@ -211,7 +228,10 @@ class World {
 
   // Push visible objects into arr as render entries {y, kind:'obj', o}.
   collectVisibleObjects(view, arr) {
-    const pad = 48;
+    // Objects are drawn upward from their feet, so a tall sprite (the 96px tower)
+    // can still be on-screen when its feet are well below the view. Pad enough to
+    // cover the tallest sprite so nothing pops out at the edges.
+    const pad = 110;
     this.forEachObjectIn(view.x - pad, view.y - pad, view.x + view.w + pad, view.y + view.h + pad, (o) => {
       if (o.dead) return;
       arr.push({ sortY: o.y, kind: 'obj', o });

@@ -74,6 +74,20 @@ function generateWorld(seed) {
       }
     }
   }
+  // Fallback: if no grass was found near centre, spiral outward for the nearest
+  // walkable tile rather than trusting the untested centre cell (could be water).
+  if (!isWalkTile(spawnTX, spawnTY)) {
+    const ccx = Math.floor(cx), ccy = Math.floor(cy);
+    let found = false;
+    for (let rad = 1; rad < Math.max(W, H) && !found; rad++) {
+      for (let dy = -rad; dy <= rad && !found; dy++) {
+        for (let dx = -rad; dx <= rad && !found; dx++) {
+          if (Math.abs(dx) !== rad && Math.abs(dy) !== rad) continue; // ring only
+          if (isWalkTile(ccx + dx, ccy + dy)) { spawnTX = ccx + dx; spawnTY = ccy + dy; found = true; }
+        }
+      }
+    }
+  }
   const spawn = { x: spawnTX * TILE + TILE / 2, y: spawnTY * TILE + TILE / 2 };
 
   const objects = [];
@@ -231,8 +245,8 @@ function generateWorld(seed) {
         else if (r < 0.30) objects.push({ type: 'grass', x: wx, y: wy, v: rng.int(0, 2), solid: false, cut: true });
         else if (r < 0.33) objects.push({ type: 'rock', x: wx, y: wy, v: rng.int(0, 2), solid: true, r: 5 });
       } else if (t === T.FLOWERS) {
-        if (r < 0.5) objects.push({ type: 'flower', x: wx, y: wy, v: rng.int(0, 2), solid: false });
-        else if (r < 0.62) objects.push({ type: 'grass', x: wx, y: wy, v: rng.int(0, 2), solid: false, cut: true });
+        if (r < 0.26) objects.push({ type: 'flower', x: wx, y: wy, v: rng.int(0, 2), solid: false });
+        else if (r < 0.44) objects.push({ type: 'grass', x: wx, y: wy, v: rng.int(0, 2), solid: false, cut: true });
       } else if (t === T.SAND) {
         if (r < 0.05) objects.push({ type: 'rock', x: wx, y: wy, v: rng.int(0, 2), solid: true, r: 5 });
         else if (r < 0.07) objects.push({ type: 'bush', x: wx, y: wy, v: rng.int(0, 2), solid: false, r: 4 });

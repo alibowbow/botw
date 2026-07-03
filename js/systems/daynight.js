@@ -8,7 +8,7 @@ class DayNight {
     this.time = startHour === undefined ? 8 : startHour; // hours 0..24
     this.day = 1;
     this.bloodMoon = 0;           // 0..1 intensity
-    this._bloodFired = false;
+    this._lastBloodDay = -1;      // day value the event last fired on (latch)
     this.onBloodMoon = null;
   }
 
@@ -22,13 +22,14 @@ class DayNight {
     const inWindow = (this.time >= 23.2 || this.time <= 0.6);
     if (isBloodNight && inWindow) {
       this.bloodMoon = Math.min(1, this.bloodMoon + dt * 0.5);
-      if (this.bloodMoon > 0.85 && !this._bloodFired) {
-        this._bloodFired = true;
+      // Day 3's window spans two midnights (start and end of the same day),
+      // so latch on the day value to fire the event exactly once per blood night.
+      if (this.bloodMoon > 0.85 && this._lastBloodDay !== this.day) {
+        this._lastBloodDay = this.day;
         if (this.onBloodMoon) this.onBloodMoon();
       }
     } else {
       this.bloodMoon = Math.max(0, this.bloodMoon - dt * 0.5);
-      if (!inWindow) this._bloodFired = false;
     }
   }
 

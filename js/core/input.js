@@ -74,6 +74,8 @@ class Input {
   isDown(...codes) { for (const c of codes) if (this.down[c]) return true; return false; }
   wasPressed(...codes) { for (const c of codes) if (this.pressed[c]) return true; return false; }
   wasReleased(...codes) { for (const c of codes) if (this.released[c]) return true; return false; }
+  // Clear a pressed edge so no later consumer in the same frame reacts to it.
+  consume(...codes) { for (const c of codes) this.pressed[c] = false; }
 
   // Movement vector from WASD / arrows (normalized on the diagonal).
   moveVector() {
