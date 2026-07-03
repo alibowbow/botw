@@ -7,8 +7,10 @@
     "start": "node server.js",
     "serve": "node server.js 8080",
     "build": "node scripts/build.js",
+    "build:artifact": "node scripts/build-artifact.js",
     "test": "node scripts/smoketest.js",
-    "test:features": "node scripts/featuretest.js"
+    "test:features": "node scripts/featuretest.js",
+    "test:regressions": "node scripts/regressions.js"
   },
   "keywords": ["game", "zelda", "breath-of-the-wild", "top-down", "canvas", "html5", "javascript"],
   "license": "MIT",
