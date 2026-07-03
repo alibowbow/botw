@@ -82,7 +82,7 @@ const path = require('path');
   }));
   console.log('SIM:', JSON.stringify(sim));
 
-  await page.screenshot({ path: path.resolve(__dirname, '..', 'assets', 'screenshot.png') });
+  await page.screenshot({ path: path.resolve(__dirname, '..', '.testshots', 'smoke.png') });
 
   // fps sanity: measure frames over 1s
   await page.evaluate(() => { window.__frames = 0; const o = GAME.render.bind(GAME); GAME.render = function () { window.__frames++; return o(); }; });

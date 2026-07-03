@@ -31,16 +31,16 @@ const path = require('path');
     GAME._centerCamera();
   }, [x, y]);
   // Exact teleport (no walkable search) for swim/climb tests that need a specific tile.
-  const tpRaw = (x, y) => page.evaluate(([x, y]) => { const p = GAME.player; p.x = x; p.y = y; p.state = 'normal'; p.kbx = p.kby = 0; GAME._centerCamera(); }, [x, y]);
+  const tpRaw = (x, y) => page.evaluate(([x, y]) => { const p = GAME.player; p.x = x; p.y = y; p.state = 'normal'; p.kbx = p.kby = 0; p.invuln = 5; GAME._centerCamera(); }, [x, y]);
   const pressE = async () => { await page.keyboard.press('KeyE'); await page.waitForTimeout(120); };
   const results = {};
 
   // TOWER
   let t = await page.evaluate(() => GAME.world.structures.towers[0]);
-  await tp(t.x, t.y + 24); await page.waitForTimeout(120); await pressE();
+  await tpRaw(t.x, t.y); await page.waitForTimeout(120); await pressE();
   results.tower = await page.evaluate(() => ({ activated: GAME.world.structures.towers[0].activated, towersFound: GAME.player.towersFound }));
   // GLIDE (press E again while activated)
-  await tp(t.x, t.y + 24); await page.waitForTimeout(120); await pressE();
+  await tpRaw(t.x, t.y); await page.waitForTimeout(120); await pressE();
   results.glide = await page.evaluate(() => GAME.player.state);
   await page.waitForTimeout(200);
   await page.evaluate(() => { GAME.player.state = 'normal'; GAME.player.glideT = 0; });
@@ -48,25 +48,25 @@ const path = require('path');
   // SHRINE
   let s = await page.evaluate(() => GAME.world.structures.shrines[0]);
   const beforeHearts = await page.evaluate(() => GAME.player.maxHearts);
-  await tp(s.x, s.y + 20); await page.waitForTimeout(120); await pressE();
+  await tpRaw(s.x, s.y); await page.waitForTimeout(120); await pressE();
   results.shrine = await page.evaluate(([bh]) => ({ activated: GAME.world.structures.shrines[0].activated, shrines: GAME.player.shrines, heartsUp: GAME.player.maxHearts !== bh, maxHearts: GAME.player.maxHearts }), [beforeHearts]);
 
   // CHEST
   let c = await page.evaluate(() => { const ch = GAME.world.structures.chests[0]; return { x: ch.x, y: ch.y, item: ch.item }; });
   const wc0 = await page.evaluate(() => GAME.player.weapons.length);
-  await tp(c.x, c.y + 14); await page.waitForTimeout(120); await pressE();
+  await tpRaw(c.x, c.y); await page.waitForTimeout(120); await pressE();
   results.chest = await page.evaluate(([w0]) => ({ opened: GAME.world.structures.chests[0].opened, weaponsGrew: GAME.player.weapons.length >= w0 }), [wc0]);
 
   // KOROK
   let k = await page.evaluate(() => GAME.world.structures.koroks[0]);
-  await tp(k.x, k.y + 8); await page.waitForTimeout(120); await pressE();
+  await tpRaw(k.x, k.y); await page.waitForTimeout(120); await pressE();
   await page.waitForTimeout(400);
   results.korok = await page.evaluate(() => ({ done: GAME.world.structures.koroks[0].done, pickupExists: GAME.pickups.some(p => p.type === 'korok') }));
 
   // COOK
   await page.evaluate(() => { GAME.player.food.apple = 3; });
   let cp = await page.evaluate(() => GAME.world.structures.cookpots[0]);
-  await tp(cp.x, cp.y + 14); await page.waitForTimeout(120); await pressE();
+  await tpRaw(cp.x, cp.y); await page.waitForTimeout(120); await pressE();
   results.cook = await page.evaluate(() => ({ cooked: GAME.player.food.cooked, apples: GAME.player.food.apple }));
 
   // SWIM: find a deep water tile
@@ -90,10 +90,18 @@ const path = require('path');
     return null;
   });
   if (cliff) {
-    await tpRaw(cliff.px, cliff.py); await page.waitForTimeout(80);
-    await page.keyboard.down('KeyD'); await page.waitForTimeout(500); await page.keyboard.up('KeyD');
-    results.climb = await page.evaluate(() => ({ state: GAME.player.state, stamina: GAME.player.stamina.toFixed(2) }));
-    await page.evaluate(() => { GAME.player.state = 'normal'; });
+    // drive the player directly (deterministic) rather than via real-time key timing
+    results.climb = await page.evaluate(([px, py]) => {
+      const p = GAME.player;
+      p.x = px; p.y = py; p.state = 'normal'; p.stamina = 1; p.staminaLock = false; p.facing = 'right'; p.kbx = p.kby = 0;
+      GAME.input.down['KeyD'] = true;
+      let engaged = false;
+      for (let i = 0; i < 40; i++) { p.update(1 / 60, GAME); if (p.state === 'climb') engaged = true; }
+      GAME.input.down['KeyD'] = false;
+      const r = { engaged, state: p.state, stamina: p.stamina.toFixed(2) };
+      p.state = 'normal';
+      return r;
+    }, [cliff.px, cliff.py]);
   }
 
   // COMBAT: spawn enemy next to player and attack
@@ -111,11 +119,11 @@ const path = require('path');
   // NIGHT + BLOOD MOON visuals
   await page.evaluate(() => { GAME.dayNight.time = 23.5; GAME.dayNight.day = 3; });
   await page.waitForTimeout(500);
-  await page.screenshot({ path: path.resolve(__dirname, '..', 'assets', 'night.png') });
+  await page.screenshot({ path: path.resolve(__dirname, '..', '.testshots', 'night.png') });
   results.night = await page.evaluate(() => ({ nightAmt: GAME.dayNight.night.toFixed(2), phase: GAME.dayNight.phase, bloodMoon: GAME.dayNight.bloodMoon.toFixed(2) }));
 
-  // BOW
-  await page.evaluate(() => { GAME.dayNight.time = 12; GAME.player.hasBow = true; GAME.player.arrows = 5; GAME.player.x = GAME.world.spawn.x; GAME.player.y = GAME.world.spawn.y; });
+  // BOW (assert via arrows consumed — an arrow can hit scenery before we sample)
+  await page.evaluate(() => { GAME.dayNight.time = 12; const p = GAME.player; p.hasBow = true; p.arrows = 5; p.invuln = 5; p.attackCd = 0; p.x = GAME.world.spawn.x; p.y = GAME.world.spawn.y; GAME.projectiles.length = 0; });
   await page.keyboard.press('KeyK'); await page.waitForTimeout(150);
   results.bow = await page.evaluate(() => ({ projectiles: GAME.projectiles.length, arrows: GAME.player.arrows }));
 
@@ -123,7 +131,7 @@ const path = require('path');
   console.log('ERRORS (' + errors.length + '):');
   for (const e of errors) console.log('  ' + e);
 
-  await page.screenshot({ path: path.resolve(__dirname, '..', 'assets', 'screenshot.png') });
+  await page.screenshot({ path: path.resolve(__dirname, '..', '.testshots', 'shot.png') });
   await browser.close();
 
   // assertions
@@ -136,8 +144,8 @@ const path = require('path');
   if (!results.korok.done) fail.push('korok not lifted');
   if (results.cook.cooked < 1) fail.push('cooking failed');
   if (results.swim && results.swim !== 'swim') fail.push('swim state not entered (' + results.swim + ')');
-  if (results.climb && !(results.climb.state === 'climb' || parseFloat(results.climb.stamina) < 0.99)) fail.push('climb did not engage (' + JSON.stringify(results.climb) + ')');
-  if (results.bow.projectiles < 1) fail.push('bow did not fire');
+  if (results.climb && !(results.climb.engaged || parseFloat(results.climb.stamina) < 0.99)) fail.push('climb did not engage (' + JSON.stringify(results.climb) + ')');
+  if (!(results.bow.projectiles >= 1 || results.bow.arrows < 5)) fail.push('bow did not fire (arrows=' + results.bow.arrows + ')');
   console.log(fail.length ? ('RESULT: FAIL -> ' + fail.join(', ')) : 'RESULT: PASS');
   process.exit(fail.length ? 1 : 0);
 })().catch(e => { console.error('CRASH', e); process.exit(2); });

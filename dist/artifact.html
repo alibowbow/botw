@@ -1122,8 +1122,13 @@ function generateWorld(seed) {
       if (!farEnough(structures.camps, p.wx, p.wy, 26 * TILE)) continue;
       reserveArea(p.tx, p.ty, 3);
       objects.push({ type: 'campfire', x: p.wx, y: p.wy, v: 0, solid: false, r: 5, light: true });
-      // chest with a weapon
-      const chestPos = { x: p.wx + rng.range(-30, 30), y: p.wy - rng.range(20, 40) };
+      // chest with a weapon — placed on a walkable tile near the fire so it is
+      // always reachable on foot (never floating on water or inside a rock)
+      let chestPos = { x: p.wx, y: p.wy };
+      for (let ct = 0; ct < 14; ct++) {
+        const cxp = p.wx + rng.range(-40, 40), cyp = p.wy + rng.range(-40, 40);
+        if (isWalkTile(Math.floor(cxp / TILE), Math.floor(cyp / TILE))) { chestPos = { x: cxp, y: cyp }; break; }
+      }
       const loot = rng.pick(['claymore', 'spear', 'sword', 'bow']);
       const chest = { type: 'chest', x: chestPos.x, y: chestPos.y, v: 0, solid: true, r: 9, interact: 'chest', opened: false, item: loot };
       objects.push(chest);

@@ -6,6 +6,12 @@ Explore a procedurally generated open world, climb Sheikah towers to reveal the 
 
 ![Wilderland gameplay](assets/screenshot.png)
 
+*Day breaks over the woods…*
+
+![Wilderland at night](assets/night.png)
+
+*…and nightfall brings a cold coast and a distant Sheikah tower.*
+
 ## Play it
 
 Because the game is self-contained, there are three ways to run it:
