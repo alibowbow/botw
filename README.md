@@ -56,6 +56,8 @@ directory (or drop the single `dist/wilderland.html` anywhere).
 | Map | `M` · Inventory `Tab` · Pause `Esc`/`P` |
 | Mute sound / music | `0` / `9` |
 
+**On mobile / touch:** an on-screen joystick (left) and action buttons (attack, interact, bow, bomb, swap, run, eat, map, pause) appear automatically. On the title and menus, just tap.
+
 ## Systems (the BotW flavor)
 
 - **Stamina wheel** gating sprinting, climbing and swimming — run out mid-climb and you fall.

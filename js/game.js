@@ -13,6 +13,8 @@ class Game {
     this.input = new Input(canvas);
     this.audio = new AudioFX();
     this.sprites = new SpriteBank();
+    this.touch = new TouchControls(this.input, this);
+    this._menuRects = [];
 
     this.state = 'title';
     this.prevState = 'title';
@@ -280,17 +282,32 @@ class Game {
   update(dt) {
     this.menus.update(dt);
     this._globalKeys();
+    if (this.touch) this.touch.sync(this.state);
 
     switch (this.state) {
-      case 'title': this._updateMenu(dt, this.titleOptions, (i) => this._titleSelect(i)); break;
-      case 'howto': if (this.input.wasPressed('Escape', 'Enter', 'Space')) { this.audio.play('menu'); this.state = this.prevState; } break;
-      case 'pause': this._updateMenu(dt, this.pauseOptions, (i) => this._pauseSelect(i), true); break;
-      case 'inventory': if (this.input.wasPressed('Tab', 'Escape', 'KeyI')) { this.audio.play('menu'); this.state = 'playing'; } break;
-      case 'map': if (this.input.wasPressed('KeyM', 'Escape')) { this.audio.play('menu'); this.state = 'playing'; } break;
+      case 'title': this._updateMenu(dt, this.titleOptions, (i) => this._titleSelect(i)); this._menuTap('title'); break;
+      case 'howto': if (this.input.wasPressed('Escape', 'Enter', 'Space') || this.input.tap) { this.audio.play('menu'); this.state = this.prevState; } break;
+      case 'pause': this._updateMenu(dt, this.pauseOptions, (i) => this._pauseSelect(i), true); this._menuTap('pause'); break;
+      case 'inventory': if (this.input.wasPressed('Tab', 'Escape', 'KeyI') || this.input.tap) { this.audio.play('menu'); this.state = 'playing'; } break;
+      case 'map': if (this.input.wasPressed('KeyM', 'Escape') || this.input.tap) { this.audio.play('menu'); this.state = 'playing'; } break;
       case 'playing': this._updatePlaying(dt); break;
       case 'death': this._updateDeath(dt); break;
     }
     this.input.lateUpdate();
+  }
+
+  _hitMenu(t) {
+    for (const r of this._menuRects) if (t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h) return r.index;
+    return -1;
+  }
+  // Handle a tap on a menu screen: select the tapped option (title also starts
+  // on a tap anywhere else, so a first-time player just taps to play).
+  _menuTap(kind) {
+    const t = this.input.tap;
+    if (!t) return;
+    const i = this._hitMenu(t);
+    if (kind === 'title') { this.audio.play('select'); if (i >= 0) this.menuIndex = i; this._titleSelect(i >= 0 ? i : 0); }
+    else if (kind === 'pause') { if (i >= 0) { this.menuIndex = i; this.audio.play('select'); this._pauseSelect(i); } }
   }
 
   _globalKeys() {
@@ -472,7 +489,10 @@ class Game {
     // HUD + overlays
     if (this.state === 'playing' || this.state === 'pause' || this.state === 'death') {
       this.hud.draw(ctx, this.W, this.H);
-      this.minimap.drawSmall(ctx, this.W - 132, this.H - 132, 120, this);
+      // On touch the bottom-right corner is the action cluster, so tuck the
+      // minimap under the top-right info panel instead.
+      if (this.touch && this.touch.enabled) this.minimap.drawSmall(ctx, this.W - 116, 82, 100, this);
+      else this.minimap.drawSmall(ctx, this.W - 132, this.H - 132, 120, this);
     }
     if (this.state === 'pause') this.menus.drawPause(ctx, this.W, this.H, this.pauseOptions, this.menuIndex);
     if (this.state === 'inventory') this.menus.drawInventory(ctx, this.W, this.H, this);

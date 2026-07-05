@@ -11,10 +11,14 @@ class HUD {
     ctx.save();
     ctx.textBaseline = 'alphabetic';
 
+    const touch = g.touch && g.touch.enabled;
     this._hearts(ctx, p, 16, 16);
     this._stamina(ctx, p, W, H);
     this._topRight(ctx, g, p, W);
-    this._weapon(ctx, g, p, 14, H - 58);
+    // On touch the bottom corners belong to the joystick/buttons, so move the
+    // weapon panel up under the hearts.
+    const wY = touch ? (16 + Math.ceil(p.maxHearts / 10) * 17 + 30) : (H - 58);
+    this._weapon(ctx, g, p, 14, wY);
     this._temperature(ctx, g, p, W, H);
     this._prompt(ctx, g, W, H);
     this._toasts(ctx, g, W, H);
@@ -118,7 +122,8 @@ class HUD {
     const label = g.currentInteract.label;
     ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
     const tw = ctx.measureText(label).width + 28;
-    const x = W / 2 - tw / 2, y = H - 96;
+    const touch = g.touch && g.touch.enabled;
+    const x = W / 2 - tw / 2, y = touch ? H - 250 : H - 96;
     this._panel(ctx, x, y, tw, 26, 8);
     ctx.fillStyle = '#ffe9a0';
     ctx.fillText(label, W / 2, y + 18);
@@ -126,7 +131,7 @@ class HUD {
 
   _toasts(ctx, g, W, H) {
     ctx.textAlign = 'center'; ctx.font = '13px monospace';
-    let y = H - 130;
+    let y = (g.touch && g.touch.enabled) ? H - 284 : H - 130;
     for (let i = 0; i < g.toasts.length; i++) {
       const t = g.toasts[i];
       ctx.globalAlpha = clamp(t.life, 0, 1);

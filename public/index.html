@@ -62,6 +62,113 @@ html, body {
 
 @keyframes fadeHint { to { opacity: 0; } }
 
+/* ---------- Touch controls ---------- */
+body.touch #hint { display: none; }
+
+#touch {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;      /* empty areas pass taps through to the canvas */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* gameplay controls appear only while playing */
+#touch .joy,
+#touch .actions,
+#touch .lbtns,
+#touch .topbtns { display: none; }
+#touch.ingame .joy,
+#touch.ingame .actions,
+#touch.ingame .lbtns,
+#touch.ingame .topbtns { display: block; }
+
+#touch .joy {
+  position: absolute;
+  left: max(18px, env(safe-area-inset-left));
+  bottom: max(22px, env(safe-area-inset-bottom));
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: rgba(230, 240, 250, 0.08);
+  border: 2px solid rgba(200, 225, 240, 0.28);
+  pointer-events: auto;
+  touch-action: none;
+}
+#touch .knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  margin: -29px 0 0 -29px;
+  border-radius: 50%;
+  background: rgba(210, 230, 245, 0.28);
+  border: 2px solid rgba(220, 235, 248, 0.5);
+  will-change: transform;
+}
+
+#touch .actions {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: 196px;
+  height: 196px;
+}
+#touch .lbtns {
+  position: absolute;
+  left: max(18px, env(safe-area-inset-left));
+  bottom: 168px;
+  display: flex;
+  gap: 10px;
+}
+#touch .topbtns {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  top: 32%;                    /* right edge, mid-height: clear of the info panel and action cluster */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#touch .tbtn {
+  pointer-events: auto;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(30, 40, 52, 0.5);
+  border: 2px solid rgba(180, 210, 230, 0.35);
+  color: #eaf2f8;
+  font: bold 18px 'Courier New', monospace;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: transform 0.05s, background 0.05s;
+}
+#touch .tbtn.on { background: rgba(90, 150, 180, 0.75); transform: scale(0.92); }
+
+/* action cluster placement (right thumb) */
+#touch .actions .tbtn { position: absolute; }
+#touch .actions .atk  { right: 4px;   bottom: 4px;   width: 78px; height: 78px; font-size: 26px; background: rgba(70, 120, 90, 0.55); }
+#touch .actions .act  { right: 90px;  bottom: 14px;  width: 60px; height: 60px; background: rgba(70, 95, 140, 0.55); }
+#touch .actions .bow  { right: 12px;  bottom: 90px;  width: 56px; height: 56px; }
+#touch .actions .bomb { right: 84px;  bottom: 84px;  width: 52px; height: 52px; }
+#touch .actions .swap { right: 140px; bottom: 64px;  width: 46px; height: 46px; font-size: 16px; }
+
+/* left helper + top buttons */
+#touch .lbtns .tbtn { width: 56px; height: 44px; border-radius: 12px; font-size: 13px; }
+#touch .lbtns .run.on { background: rgba(120, 190, 90, 0.8); }
+#touch .topbtns .tbtn { width: 54px; height: 40px; border-radius: 10px; font-size: 14px; }
+
+@media (max-height: 460px) {
+  #touch .joy { width: 108px; height: 108px; }
+  #touch .knob { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
+  #touch .actions { width: 168px; height: 168px; }
+  #touch .lbtns { bottom: 140px; }
+}
+
 </style>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🗡️</text></svg>" />
 </head>
@@ -262,6 +369,8 @@ class Input {
     this.pressed = Object.create(null);  // code -> true for the frame it went down
     this.released = Object.create(null); // code -> true for the frame it went up
     this.mouse = { x: 0, y: 0, sx: 0, sy: 0, left: false, right: false, leftPressed: false, rightPressed: false, wheel: 0, moved: false };
+    this.touchMove = { x: 0, y: 0 };     // virtual joystick direction (unit vector, 0 when idle)
+    this.tap = null;                     // {x,y} canvas-relative tap, consumed by menus
     this.anyInteraction = false;         // true once the user has interacted (for audio unlock)
     this._blockKeys = new Set([
       'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab',
@@ -298,9 +407,19 @@ class Input {
     });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener('wheel', (e) => { this.mouse.wheel += Math.sign(e.deltaY); e.preventDefault(); }, { passive: false });
-    // Touch: treat a tap as an interaction so audio can unlock.
-    c.addEventListener('touchstart', () => { this.anyInteraction = true; }, { passive: true });
+    // Touch on empty canvas area = a tap (menus/confirm). Touches on the on-screen
+    // controls target those DOM elements instead, so they don't land here.
+    c.addEventListener('touchstart', (e) => {
+      this.anyInteraction = true;
+      const t = e.changedTouches[0];
+      const r = this.canvas.getBoundingClientRect();
+      this.tap = { x: t.clientX - r.left, y: t.clientY - r.top };
+    }, { passive: true });
   }
+
+  // Synthesize a key press/release (used by on-screen touch buttons).
+  pressKey(code) { if (!this.down[code]) this.pressed[code] = true; this.down[code] = true; this.anyInteraction = true; }
+  releaseKey(code) { this.down[code] = false; this.released[code] = true; }
 
   _updateMouse(e) {
     const r = this.canvas.getBoundingClientRect();
@@ -321,6 +440,7 @@ class Input {
     this.mouse.leftPressed = false;
     this.mouse.rightPressed = false;
     this.mouse.wheel = 0;
+    this.tap = null;
   }
 
   isDown(...codes) { for (const c of codes) if (this.down[c]) return true; return false; }
@@ -329,8 +449,11 @@ class Input {
   // Clear a pressed edge so no later consumer in the same frame reacts to it.
   consume(...codes) { for (const c of codes) this.pressed[c] = false; }
 
-  // Movement vector from WASD / arrows (normalized on the diagonal).
+  // Movement vector from WASD / arrows (normalized on the diagonal). The virtual
+  // joystick, when active, overrides the keyboard.
   moveVector() {
+    const tm = this.touchMove;
+    if (tm && (tm.x !== 0 || tm.y !== 0)) return { x: tm.x, y: tm.y };
     let x = 0, y = 0;
     if (this.isDown('KeyA', 'ArrowLeft')) x -= 1;
     if (this.isDown('KeyD', 'ArrowRight')) x += 1;
@@ -338,6 +461,142 @@ class Input {
     if (this.isDown('KeyS', 'ArrowDown')) y += 1;
     if (x !== 0 && y !== 0) { const inv = Math.SQRT1_2; x *= inv; y *= inv; }
     return { x, y };
+  }
+}
+
+
+/* ===== js/core/touch.js ===== */
+'use strict';
+/* touch.js — on-screen controls for touch devices: a left virtual joystick for
+   movement and right-hand action buttons. Buttons synthesize key presses so the
+   rest of the game reads input exactly as it does for a keyboard. */
+
+class TouchControls {
+  constructor(input, game) {
+    this.input = input;
+    this.game = game;
+    this.enabled = ('ontouchstart' in window) || navigator.maxTouchPoints > 0 ||
+      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    this._joyId = null;
+    this._joyRect = null;
+    if (!this.enabled) return;
+    document.body.classList.add('touch');
+    this._build();
+    // Unlock audio on the first touch anywhere (must be inside a gesture).
+    window.addEventListener('touchstart', () => this.game.audio.unlock(), { passive: true });
+  }
+
+  _build() {
+    const wrap = document.getElementById('wrap') || document.body;
+    const root = document.createElement('div');
+    root.id = 'touch';
+    wrap.appendChild(root);
+    this.root = root;
+
+    // --- joystick ---
+    const joy = document.createElement('div'); joy.className = 'joy';
+    const knob = document.createElement('div'); knob.className = 'knob';
+    joy.appendChild(knob); root.appendChild(joy);
+    this.joy = joy; this.knob = knob;
+    this._bindJoystick();
+
+    // --- right-hand action cluster ---
+    const actions = document.createElement('div'); actions.className = 'actions'; root.appendChild(actions);
+    this._btn(actions, 'atk', 'A', 'KeyJ');    // attack
+    this._btn(actions, 'act', 'E', 'KeyE');    // interact / activate
+    this._btn(actions, 'bow', '➹', 'KeyK');    // bow
+    this._btn(actions, 'bomb', '✸', 'KeyB');   // bomb
+    this._btn(actions, 'swap', '⟳', 'KeyQ');   // cycle weapon
+
+    // --- left helpers near the joystick ---
+    const left = document.createElement('div'); left.className = 'lbtns'; root.appendChild(left);
+    this._btn(left, 'run', 'RUN', 'ShiftLeft', { toggle: true }); // sprint (toggle)
+    this._btn(left, 'eat', 'EAT', 'KeyF');
+
+    // --- top-right system buttons ---
+    const top = document.createElement('div'); top.className = 'topbtns'; root.appendChild(top);
+    this._btn(top, 'map', 'MAP', 'KeyM');
+    this._btn(top, 'menu', '❚❚', 'Escape');
+  }
+
+  _btn(parent, cls, label, code, opts) {
+    opts = opts || {};
+    const b = document.createElement('div');
+    b.className = 'tbtn ' + cls;
+    b.textContent = label;
+    parent.appendChild(b);
+
+    const press = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      this.game.audio.unlock();
+      if (opts.toggle) {
+        const on = !b.classList.contains('on');
+        b.classList.toggle('on', on);
+        this.input.down[code] = on; // held while toggled on
+      } else {
+        this.input.pressKey(code);
+        b.classList.add('on');
+      }
+    };
+    const release = (e) => {
+      if (e) e.preventDefault();
+      if (!opts.toggle) { this.input.releaseKey(code); b.classList.remove('on'); }
+    };
+    b.addEventListener('touchstart', press, { passive: false });
+    b.addEventListener('touchend', release, { passive: false });
+    b.addEventListener('touchcancel', release, { passive: false });
+    // mouse fallback so the controls are testable on desktop
+    b.addEventListener('mousedown', press);
+    b.addEventListener('mouseup', release);
+    b.addEventListener('mouseleave', (e) => { if (b.classList.contains('on') && !opts.toggle) release(e); });
+    return b;
+  }
+
+  _bindJoystick() {
+    const joy = this.joy, knob = this.knob;
+    const setKnob = (dx, dy) => { knob.style.transform = `translate(${dx}px, ${dy}px)`; };
+    const reset = () => { setKnob(0, 0); this.input.touchMove.x = 0; this.input.touchMove.y = 0; this._joyId = null; };
+
+    const move = (cx, cy) => {
+      const r = this._joyRect || joy.getBoundingClientRect();
+      const ox = r.left + r.width / 2, oy = r.top + r.height / 2;
+      const dx = cx - ox, dy = cy - oy;
+      const m = Math.hypot(dx, dy);
+      const maxR = r.width * 0.36;
+      const cl = Math.min(m, maxR);
+      const ux = m > 0.0001 ? dx / m : 0, uy = m > 0.0001 ? dy / m : 0;
+      setKnob(ux * cl, uy * cl);
+      if (m > 8) { this.input.touchMove.x = ux; this.input.touchMove.y = uy; }
+      else { this.input.touchMove.x = 0; this.input.touchMove.y = 0; }
+    };
+
+    joy.addEventListener('touchstart', (e) => {
+      e.preventDefault(); this.game.audio.unlock();
+      this._joyRect = joy.getBoundingClientRect();
+      const t = e.changedTouches[0];
+      this._joyId = t.identifier;
+      move(t.clientX, t.clientY);
+    }, { passive: false });
+    joy.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      for (const t of e.changedTouches) if (t.identifier === this._joyId) move(t.clientX, t.clientY);
+    }, { passive: false });
+    const end = (e) => { for (const t of e.changedTouches) if (t.identifier === this._joyId) { reset(); } };
+    joy.addEventListener('touchend', end, { passive: false });
+    joy.addEventListener('touchcancel', end, { passive: false });
+
+    // mouse fallback (desktop testing)
+    let md = false;
+    joy.addEventListener('mousedown', (e) => { md = true; this._joyRect = joy.getBoundingClientRect(); move(e.clientX, e.clientY); });
+    window.addEventListener('mousemove', (e) => { if (md) move(e.clientX, e.clientY); });
+    window.addEventListener('mouseup', () => { if (md) { md = false; reset(); } });
+  }
+
+  // Show gameplay controls only while actually playing.
+  sync(state) {
+    if (!this.enabled) return;
+    this.root.classList.toggle('ingame', state === 'playing');
+    if (state !== 'playing') { this.input.touchMove.x = 0; this.input.touchMove.y = 0; if (this.knob) this.knob.style.transform = 'translate(0,0)'; }
   }
 }
 
@@ -2802,10 +3061,14 @@ class HUD {
     ctx.save();
     ctx.textBaseline = 'alphabetic';
 
+    const touch = g.touch && g.touch.enabled;
     this._hearts(ctx, p, 16, 16);
     this._stamina(ctx, p, W, H);
     this._topRight(ctx, g, p, W);
-    this._weapon(ctx, g, p, 14, H - 58);
+    // On touch the bottom corners belong to the joystick/buttons, so move the
+    // weapon panel up under the hearts.
+    const wY = touch ? (16 + Math.ceil(p.maxHearts / 10) * 17 + 30) : (H - 58);
+    this._weapon(ctx, g, p, 14, wY);
     this._temperature(ctx, g, p, W, H);
     this._prompt(ctx, g, W, H);
     this._toasts(ctx, g, W, H);
@@ -2909,7 +3172,8 @@ class HUD {
     const label = g.currentInteract.label;
     ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
     const tw = ctx.measureText(label).width + 28;
-    const x = W / 2 - tw / 2, y = H - 96;
+    const touch = g.touch && g.touch.enabled;
+    const x = W / 2 - tw / 2, y = touch ? H - 250 : H - 96;
     this._panel(ctx, x, y, tw, 26, 8);
     ctx.fillStyle = '#ffe9a0';
     ctx.fillText(label, W / 2, y + 18);
@@ -2917,7 +3181,7 @@ class HUD {
 
   _toasts(ctx, g, W, H) {
     ctx.textAlign = 'center'; ctx.font = '13px monospace';
-    let y = H - 130;
+    let y = (g.touch && g.touch.enabled) ? H - 284 : H - 130;
     for (let i = 0; i < g.toasts.length; i++) {
       const t = g.toasts[i];
       ctx.globalAlpha = clamp(t.life, 0, 1);
@@ -3176,14 +3440,17 @@ class Menus {
     this.drawMenuList(ctx, options, index, cx, H * 0.62);
 
     ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = '11px monospace';
-    ctx.fillText('Arrow keys / W,S to choose · Enter to select · or just press Enter to begin', cx, H - 24);
+    const touch = document.body.classList.contains('touch');
+    ctx.fillText(touch ? 'Tap an option, or tap anywhere to begin' : 'Arrow keys / W,S to choose · Enter to select · or just press Enter to begin', cx, H - 24);
   }
 
   drawMenuList(ctx, options, index, cx, y) {
     ctx.textAlign = 'center'; ctx.font = 'bold 18px monospace';
+    if (this.game) this.game._menuRects = [];
     for (let i = 0; i < options.length; i++) {
       const sel = i === index;
       const oy = y + i * 30;
+      if (this.game) this.game._menuRects.push({ index: i, x: cx - 150, y: oy - 20, w: 300, h: 30 });
       if (sel) {
         const w = ctx.measureText(options[i]).width + 44;
         ctx.fillStyle = 'rgba(255,235,150,0.16)';
@@ -3317,6 +3584,8 @@ class Game {
     this.input = new Input(canvas);
     this.audio = new AudioFX();
     this.sprites = new SpriteBank();
+    this.touch = new TouchControls(this.input, this);
+    this._menuRects = [];
 
     this.state = 'title';
     this.prevState = 'title';
@@ -3584,17 +3853,32 @@ class Game {
   update(dt) {
     this.menus.update(dt);
     this._globalKeys();
+    if (this.touch) this.touch.sync(this.state);
 
     switch (this.state) {
-      case 'title': this._updateMenu(dt, this.titleOptions, (i) => this._titleSelect(i)); break;
-      case 'howto': if (this.input.wasPressed('Escape', 'Enter', 'Space')) { this.audio.play('menu'); this.state = this.prevState; } break;
-      case 'pause': this._updateMenu(dt, this.pauseOptions, (i) => this._pauseSelect(i), true); break;
-      case 'inventory': if (this.input.wasPressed('Tab', 'Escape', 'KeyI')) { this.audio.play('menu'); this.state = 'playing'; } break;
-      case 'map': if (this.input.wasPressed('KeyM', 'Escape')) { this.audio.play('menu'); this.state = 'playing'; } break;
+      case 'title': this._updateMenu(dt, this.titleOptions, (i) => this._titleSelect(i)); this._menuTap('title'); break;
+      case 'howto': if (this.input.wasPressed('Escape', 'Enter', 'Space') || this.input.tap) { this.audio.play('menu'); this.state = this.prevState; } break;
+      case 'pause': this._updateMenu(dt, this.pauseOptions, (i) => this._pauseSelect(i), true); this._menuTap('pause'); break;
+      case 'inventory': if (this.input.wasPressed('Tab', 'Escape', 'KeyI') || this.input.tap) { this.audio.play('menu'); this.state = 'playing'; } break;
+      case 'map': if (this.input.wasPressed('KeyM', 'Escape') || this.input.tap) { this.audio.play('menu'); this.state = 'playing'; } break;
       case 'playing': this._updatePlaying(dt); break;
       case 'death': this._updateDeath(dt); break;
     }
     this.input.lateUpdate();
+  }
+
+  _hitMenu(t) {
+    for (const r of this._menuRects) if (t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h) return r.index;
+    return -1;
+  }
+  // Handle a tap on a menu screen: select the tapped option (title also starts
+  // on a tap anywhere else, so a first-time player just taps to play).
+  _menuTap(kind) {
+    const t = this.input.tap;
+    if (!t) return;
+    const i = this._hitMenu(t);
+    if (kind === 'title') { this.audio.play('select'); if (i >= 0) this.menuIndex = i; this._titleSelect(i >= 0 ? i : 0); }
+    else if (kind === 'pause') { if (i >= 0) { this.menuIndex = i; this.audio.play('select'); this._pauseSelect(i); } }
   }
 
   _globalKeys() {
@@ -3776,7 +4060,10 @@ class Game {
     // HUD + overlays
     if (this.state === 'playing' || this.state === 'pause' || this.state === 'death') {
       this.hud.draw(ctx, this.W, this.H);
-      this.minimap.drawSmall(ctx, this.W - 132, this.H - 132, 120, this);
+      // On touch the bottom-right corner is the action cluster, so tuck the
+      // minimap under the top-right info panel instead.
+      if (this.touch && this.touch.enabled) this.minimap.drawSmall(ctx, this.W - 116, 82, 100, this);
+      else this.minimap.drawSmall(ctx, this.W - 132, this.H - 132, 120, this);
     }
     if (this.state === 'pause') this.menus.drawPause(ctx, this.W, this.H, this.pauseOptions, this.menuIndex);
     if (this.state === 'inventory') this.menus.drawInventory(ctx, this.W, this.H, this);

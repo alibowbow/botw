@@ -10,6 +10,8 @@ class Input {
     this.pressed = Object.create(null);  // code -> true for the frame it went down
     this.released = Object.create(null); // code -> true for the frame it went up
     this.mouse = { x: 0, y: 0, sx: 0, sy: 0, left: false, right: false, leftPressed: false, rightPressed: false, wheel: 0, moved: false };
+    this.touchMove = { x: 0, y: 0 };     // virtual joystick direction (unit vector, 0 when idle)
+    this.tap = null;                     // {x,y} canvas-relative tap, consumed by menus
     this.anyInteraction = false;         // true once the user has interacted (for audio unlock)
     this._blockKeys = new Set([
       'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab',
@@ -46,9 +48,19 @@ class Input {
     });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener('wheel', (e) => { this.mouse.wheel += Math.sign(e.deltaY); e.preventDefault(); }, { passive: false });
-    // Touch: treat a tap as an interaction so audio can unlock.
-    c.addEventListener('touchstart', () => { this.anyInteraction = true; }, { passive: true });
+    // Touch on empty canvas area = a tap (menus/confirm). Touches on the on-screen
+    // controls target those DOM elements instead, so they don't land here.
+    c.addEventListener('touchstart', (e) => {
+      this.anyInteraction = true;
+      const t = e.changedTouches[0];
+      const r = this.canvas.getBoundingClientRect();
+      this.tap = { x: t.clientX - r.left, y: t.clientY - r.top };
+    }, { passive: true });
   }
+
+  // Synthesize a key press/release (used by on-screen touch buttons).
+  pressKey(code) { if (!this.down[code]) this.pressed[code] = true; this.down[code] = true; this.anyInteraction = true; }
+  releaseKey(code) { this.down[code] = false; this.released[code] = true; }
 
   _updateMouse(e) {
     const r = this.canvas.getBoundingClientRect();
@@ -69,6 +81,7 @@ class Input {
     this.mouse.leftPressed = false;
     this.mouse.rightPressed = false;
     this.mouse.wheel = 0;
+    this.tap = null;
   }
 
   isDown(...codes) { for (const c of codes) if (this.down[c]) return true; return false; }
@@ -77,8 +90,11 @@ class Input {
   // Clear a pressed edge so no later consumer in the same frame reacts to it.
   consume(...codes) { for (const c of codes) this.pressed[c] = false; }
 
-  // Movement vector from WASD / arrows (normalized on the diagonal).
+  // Movement vector from WASD / arrows (normalized on the diagonal). The virtual
+  // joystick, when active, overrides the keyboard.
   moveVector() {
+    const tm = this.touchMove;
+    if (tm && (tm.x !== 0 || tm.y !== 0)) return { x: tm.x, y: tm.y };
     let x = 0, y = 0;
     if (this.isDown('KeyA', 'ArrowLeft')) x -= 1;
     if (this.isDown('KeyD', 'ArrowRight')) x += 1;

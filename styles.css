@@ -54,3 +54,110 @@ html, body {
 }
 
 @keyframes fadeHint { to { opacity: 0; } }
+
+/* ---------- Touch controls ---------- */
+body.touch #hint { display: none; }
+
+#touch {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;      /* empty areas pass taps through to the canvas */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* gameplay controls appear only while playing */
+#touch .joy,
+#touch .actions,
+#touch .lbtns,
+#touch .topbtns { display: none; }
+#touch.ingame .joy,
+#touch.ingame .actions,
+#touch.ingame .lbtns,
+#touch.ingame .topbtns { display: block; }
+
+#touch .joy {
+  position: absolute;
+  left: max(18px, env(safe-area-inset-left));
+  bottom: max(22px, env(safe-area-inset-bottom));
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: rgba(230, 240, 250, 0.08);
+  border: 2px solid rgba(200, 225, 240, 0.28);
+  pointer-events: auto;
+  touch-action: none;
+}
+#touch .knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  margin: -29px 0 0 -29px;
+  border-radius: 50%;
+  background: rgba(210, 230, 245, 0.28);
+  border: 2px solid rgba(220, 235, 248, 0.5);
+  will-change: transform;
+}
+
+#touch .actions {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: 196px;
+  height: 196px;
+}
+#touch .lbtns {
+  position: absolute;
+  left: max(18px, env(safe-area-inset-left));
+  bottom: 168px;
+  display: flex;
+  gap: 10px;
+}
+#touch .topbtns {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  top: 32%;                    /* right edge, mid-height: clear of the info panel and action cluster */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#touch .tbtn {
+  pointer-events: auto;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(30, 40, 52, 0.5);
+  border: 2px solid rgba(180, 210, 230, 0.35);
+  color: #eaf2f8;
+  font: bold 18px 'Courier New', monospace;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: transform 0.05s, background 0.05s;
+}
+#touch .tbtn.on { background: rgba(90, 150, 180, 0.75); transform: scale(0.92); }
+
+/* action cluster placement (right thumb) */
+#touch .actions .tbtn { position: absolute; }
+#touch .actions .atk  { right: 4px;   bottom: 4px;   width: 78px; height: 78px; font-size: 26px; background: rgba(70, 120, 90, 0.55); }
+#touch .actions .act  { right: 90px;  bottom: 14px;  width: 60px; height: 60px; background: rgba(70, 95, 140, 0.55); }
+#touch .actions .bow  { right: 12px;  bottom: 90px;  width: 56px; height: 56px; }
+#touch .actions .bomb { right: 84px;  bottom: 84px;  width: 52px; height: 52px; }
+#touch .actions .swap { right: 140px; bottom: 64px;  width: 46px; height: 46px; font-size: 16px; }
+
+/* left helper + top buttons */
+#touch .lbtns .tbtn { width: 56px; height: 44px; border-radius: 12px; font-size: 13px; }
+#touch .lbtns .run.on { background: rgba(120, 190, 90, 0.8); }
+#touch .topbtns .tbtn { width: 54px; height: 40px; border-radius: 10px; font-size: 14px; }
+
+@media (max-height: 460px) {
+  #touch .joy { width: 108px; height: 108px; }
+  #touch .knob { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
+  #touch .actions { width: 168px; height: 168px; }
+  #touch .lbtns { bottom: 140px; }
+}

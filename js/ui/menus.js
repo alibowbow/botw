@@ -56,14 +56,17 @@ class Menus {
     this.drawMenuList(ctx, options, index, cx, H * 0.62);
 
     ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = '11px monospace';
-    ctx.fillText('Arrow keys / W,S to choose · Enter to select · or just press Enter to begin', cx, H - 24);
+    const touch = document.body.classList.contains('touch');
+    ctx.fillText(touch ? 'Tap an option, or tap anywhere to begin' : 'Arrow keys / W,S to choose · Enter to select · or just press Enter to begin', cx, H - 24);
   }
 
   drawMenuList(ctx, options, index, cx, y) {
     ctx.textAlign = 'center'; ctx.font = 'bold 18px monospace';
+    if (this.game) this.game._menuRects = [];
     for (let i = 0; i < options.length; i++) {
       const sel = i === index;
       const oy = y + i * 30;
+      if (this.game) this.game._menuRects.push({ index: i, x: cx - 150, y: oy - 20, w: 300, h: 30 });
       if (sel) {
         const w = ctx.measureText(options[i]).width + 44;
         ctx.fillStyle = 'rgba(255,235,150,0.16)';
