@@ -33,5 +33,12 @@ if (!fs.existsSync(distDir)) fs.mkdirSync(distDir);
 const outPath = path.join(distDir, 'wilderland.html');
 fs.writeFileSync(outPath, out);
 
+// Also emit a self-contained public/index.html — this is what static hosts
+// (Vercel/Netlify/GitHub Pages) serve, so there are no separate CSS/JS files
+// to 404 no matter how the host resolves paths.
+const pubDir = path.join(ROOT, 'public');
+if (!fs.existsSync(pubDir)) fs.mkdirSync(pubDir);
+fs.writeFileSync(path.join(pubDir, 'index.html'), out);
+
 const kb = (Buffer.byteLength(out) / 1024).toFixed(0);
-console.log(`Built ${outPath} (${kb} KB, ${order.length} scripts inlined).`);
+console.log(`Built ${outPath} and public/index.html (${kb} KB, ${order.length} scripts inlined).`);

@@ -31,6 +31,14 @@ Then open http://localhost:8080. Any static server works too (`npx serve`, `pyth
 **3. Directly**
 `index.html` uses classic (non-module) scripts, so on most browsers you can open it straight from disk (`file://…/index.html`).
 
+### Deploying (Vercel / Netlify / GitHub Pages)
+
+`vercel.json` runs `npm run build`, which inlines everything into a single
+self-contained `public/index.html` (no separate CSS/JS files to mis-serve), and
+Vercel serves `public/`. On Vercel the project just needs to redeploy after a
+push — no extra settings. For any other static host, publish the `public/`
+directory (or drop the single `dist/wilderland.html` anywhere).
+
 ## Controls
 
 | Action | Keys |
