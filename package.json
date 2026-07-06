@@ -11,7 +11,8 @@
     "test": "node scripts/smoketest.js",
     "test:features": "node scripts/featuretest.js",
     "test:regressions": "node scripts/regressions.js",
-    "test:touch": "node scripts/touchtest.js"
+    "test:touch": "node scripts/touchtest.js",
+    "test:super": "node scripts/supertest.js"
   },
   "keywords": ["game", "zelda", "breath-of-the-wild", "top-down", "canvas", "html5", "javascript"],
   "license": "MIT",

@@ -58,6 +58,19 @@ directory (or drop the single `dist/wilderland.html` anywhere).
 
 **On mobile / touch:** an on-screen joystick (left) and action buttons (attack, interact, bow, bomb, swap, run, eat, map, pause) appear automatically. On the title and menus, just tap.
 
+## ⚡ "Super Saiyan" upgrade
+
+A major awakening pass on top of the base game:
+
+- **⚡ Awakening** — fight to fill the **KI gauge**, then press `R` (or the ⚡ button) to transform: a golden aura, **2× damage**, **+40% speed**, **infinite stamina**, health regen, and an activation shockwave. Lasts 12 seconds.
+- **Dodge roll + Flurry Rush** — `Space` rolls with i-frames; a *just-dodge* right next to an attacking foe triggers a slow-motion **Flurry Rush** with doubled damage.
+- **Dynamic lighting** — real darkness at night with a torch glow around Link, emissive campfires/shrines/towers, fireflies, and bloom.
+- **Weather** — evolving clear / rain / **thunderstorm** / fog; storms flash lightning that will **strike you if you hold a metal weapon in the open** (BOTW-style), plus biome snow.
+- **Living world** — butterflies by day, fireflies by night, wind-swayed foliage, shimmering water.
+- **Boss: Stone Talus** — a rock golem whose armoured body only clangs; damage its rotating **ore weak-point**, dodge its ground-slam and boulders. Beating it grants a **Heart Container** and an elemental weapon. Look for the orange marker on the map.
+- **Elemental weapons** — Flameblade (**burn**), Frostspire (**freeze**, +damage), Thunderstorm (**shock stun**) variants of every blade.
+- **Combat juice** — floating damage numbers, a hit-combo counter, hit-stop, and screen shake.
+
 ## Systems (the BotW flavor)
 
 - **Stamina wheel** gating sprinting, climbing and swimming — run out mid-climb and you fall.

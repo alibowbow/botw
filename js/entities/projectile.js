@@ -58,6 +58,7 @@ class Projectile {
             this.dead = true; return;
           }
         }
+        if (game.boss && game.boss.alive && game.boss.projHit(this.x, this.y, this.dmg, game)) { this.dead = true; return; }
       }
     }
     this.spin += dt * 10;

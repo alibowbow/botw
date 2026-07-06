@@ -37,7 +37,14 @@ class Game {
     this.shakeAmt = 0;
     this.hitstop = 0;
     this.saveTimer = 8;
-    this.snowFlakes = [];
+    this._time = 0;
+    this.timeScale = 1;
+    this.slowmoT = 0; this.slowmoScale = 1;
+    this.lighting = new Lighting();
+    this.ambient = new Ambient();
+    this.lights = [];
+    this.floaters = [];
+    this.combo = 0; this.comboTimer = 0; this.comboBest = 0;
 
     this.resize();
     // Resume the saved world if there is one, otherwise roll a fresh seed.
@@ -62,10 +69,14 @@ class Game {
     this.minimap = new Minimap(this.world);
     this.player = new Player(this.world.spawn.x, this.world.spawn.y);
     this.dayNight = new DayNight(8);
+    this.weather = new Weather(new RNG((seed ^ 0xBEEF) >>> 0));
     this.spawner = new Spawner();
     this.hud = new HUD(this);
     this.menus = new Menus(this);
     this.enemies.length = 0; this.pickups.length = 0; this.projectiles.length = 0;
+    this.lights.length = 0; this.floaters.length = 0;
+    this.combo = 0; this.comboTimer = 0;
+    this.boss = null;
     this.toasts.length = 0;
     this.dayNight.onBloodMoon = () => this._bloodMoon();
     // reveal spawn area
@@ -107,8 +118,35 @@ class Game {
     if (this.toasts.length > 4) this.toasts.pop();
   }
 
-  shake(a) { this.shakeAmt = Math.min(10, this.shakeAmt + a); }
+  shake(a) { this.shakeAmt = Math.min(14, this.shakeAmt + a); }
   hitStop(t) { this.hitstop = Math.max(this.hitstop, t); }
+  startSlowmo(dur, scale) { this.slowmoT = Math.max(this.slowmoT, dur); this.slowmoScale = scale; }
+  addLight(x, y, r, col, life) { if (this.lights.length < 40) this.lights.push({ x, y, r, col, life, max: life }); }
+  addFloater(x, y, text, col, opts) {
+    opts = opts || {};
+    this.floaters.push({ x: x + rand(-3, 3), y, text: String(text), col: col || '#fff', life: opts.life || 0.9, max: opts.life || 0.9, vy: opts.vy || -30, size: opts.size || 12 });
+    if (this.floaters.length > 60) this.floaters.shift();
+  }
+  addCombo(n) {
+    this.combo += (n || 1);
+    this.comboTimer = 2.0;
+    if (this.combo > this.comboBest) this.comboBest = this.combo;
+    if (this.player) this.player.awakenGain(0.02 * (n || 1) + this.combo * 0.002);
+  }
+  rngPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  startBoss(ref) {
+    if (this.boss) return;
+    this.boss = new Boss(ref.x, ref.y, this, ref);
+    this.toast('A Stone Talus awakens! Strike its glowing ore.');
+    this.shake(7); this.audio.play('activate');
+  }
+  _checkBoss() {
+    if (this.boss || !this.world.structures.talus) return;
+    for (const t of this.world.structures.talus) {
+      if (!t.defeated && dist(this.player.x, this.player.y, t.x, t.y) < 190) { this.startBoss(t); break; }
+    }
+  }
 
   /* ---------------- spawning helpers ---------------- */
   spawnEnemy(x, y, kind) {
@@ -280,6 +318,7 @@ class Game {
 
   /* ---------------- update ---------------- */
   update(dt) {
+    this._time += dt;
     this.menus.update(dt);
     this._globalKeys();
     if (this.touch) this.touch.sync(this.state);
@@ -349,24 +388,39 @@ class Game {
     // hitstop freezes the world briefly for impact
     if (this.hitstop > 0) { this.hitstop -= dt; dt = Math.min(dt, 0.0005); }
 
-    this.dayNight.update(dt);
+    // slow-motion (flurry rush) scales the simulation but not real-time timers
+    if (this.slowmoT > 0) { this.slowmoT -= dt; this.timeScale = this.slowmoScale; }
+    else this.timeScale = 1;
+    const sdt = dt * this.timeScale;
+
+    this.dayNight.update(sdt);
+    this.weather.update(sdt, this);
+    this.ambient.update(sdt, this);
     this.audio.updateMusic(dt, this.dayNight.night);
 
     // mouse world pos
     this.mouseWorld.x = this.camera.x + inp.mouse.sx / this.zoom;
     this.mouseWorld.y = this.camera.y + inp.mouse.sy / this.zoom;
 
-    this.player.update(dt, this);
-    this.spawner.update(dt, this);
-    for (const e of this.enemies) e.update(dt, this);
-    for (const pk of this.pickups) pk.update(dt, this);
-    for (const pr of this.projectiles) pr.update(dt, this);
-    this.particles.update(dt);
+    this.player.update(sdt, this);
+    this.spawner.update(sdt, this);
+    this._checkBoss();
+    for (const e of this.enemies) e.update(sdt, this);
+    if (this.boss) this.boss.update(sdt, this);
+    for (const pk of this.pickups) pk.update(sdt, this);
+    for (const pr of this.projectiles) pr.update(sdt, this);
+    this.particles.update(sdt);
+
+    // transient lights + floating text
+    for (let i = this.lights.length - 1; i >= 0; i--) { this.lights[i].life -= sdt; if (this.lights[i].life <= 0) this.lights.splice(i, 1); }
+    for (let i = this.floaters.length - 1; i >= 0; i--) { const f = this.floaters[i]; f.life -= sdt; f.y += f.vy * sdt; f.vy += 40 * sdt; if (f.life <= 0) this.floaters.splice(i, 1); }
+    if (this.comboTimer > 0) { this.comboTimer -= dt; if (this.comboTimer <= 0) this.combo = 0; }
 
     // cull dead
     this.enemies = this.enemies.filter(e => e.state !== 'dead' || e.deadT > 0);
     this.pickups = this.pickups.filter(p => !p.dead);
     this.projectiles = this.projectiles.filter(p => !p.dead);
+    if (this.boss && this.boss.dead && this.boss.deadT <= 0) this.boss = null;
 
     // interaction
     this._updateInteraction();
@@ -390,7 +444,7 @@ class Game {
     if (p.state === 'glide' || p.state === 'climb' || p.state === 'swim') { this.currentInteract = null; return; }
     const o = this.world.nearestInteractable(p.x, p.y, INTERACT_RANGE);
     this.currentInteract = o ? { obj: o, label: this._interactLabel(o) } : null;
-    if (this.currentInteract && this.input.wasPressed('KeyE', 'Space')) {
+    if (this.currentInteract && this.input.wasPressed('KeyE')) {
       this._doInteract(o);
     }
   }
@@ -452,6 +506,7 @@ class Game {
     ctx.setTransform(this.zoom * this.dpr, 0, 0, this.zoom * this.dpr, -camX * this.zoom * this.dpr, -camY * this.zoom * this.dpr);
 
     this.world.drawTerrain(ctx, this.view);
+    this.ambient.drawWater(ctx, this);
 
     // build y-sorted render list
     const list = [];
@@ -459,18 +514,21 @@ class Game {
     const p = this.player;
     list.push({ sortY: p.y, kind: 'player' });
     for (const e of this.enemies) if (this._inView(e.x, e.y, 40)) list.push({ sortY: e.y, kind: 'enemy', e });
+    if (this.boss && this._inView(this.boss.x, this.boss.y, 120)) list.push({ sortY: this.boss.y, kind: 'boss' });
     for (const pk of this.pickups) if (this._inView(pk.x, pk.y, 30)) list.push({ sortY: pk.y, kind: 'pickup', pk });
     for (const pr of this.projectiles) if (this._inView(pr.x, pr.y, 30)) list.push({ sortY: pr.y + 4, kind: 'proj', pr });
     list.sort((a, b) => a.sortY - b.sortY);
     for (const it of list) {
-      if (it.kind === 'obj') this.world.drawObject(ctx, it.o);
+      if (it.kind === 'obj') this.world.drawObject(ctx, it.o, this._time);
       else if (it.kind === 'player') p.draw(ctx, this);
       else if (it.kind === 'enemy') it.e.draw(ctx, this);
+      else if (it.kind === 'boss') this.boss.draw(ctx, this);
       else if (it.kind === 'pickup') it.pk.draw(ctx, this);
       else if (it.kind === 'proj') it.pr.draw(ctx, this);
     }
 
     this.particles.draw(ctx);
+    this.ambient.drawDay(ctx, this);
 
     // interaction highlight ring
     if (this.currentInteract) {
@@ -482,9 +540,11 @@ class Game {
     ctx.restore();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
-    // day/night tint (multiply)
-    this._drawTint(ctx);
-    this._drawWeather(ctx);
+    // lighting, fireflies, weather, floating text (all screen space)
+    this.lighting.render(ctx, this);
+    this.ambient.drawGlow(ctx, this);
+    this.weather.render(ctx, this);
+    this._drawFloaters(ctx);
 
     // HUD + overlays
     if (this.state === 'playing' || this.state === 'pause' || this.state === 'death') {
@@ -507,28 +567,19 @@ class Game {
     return x > this.view.x - pad && x < this.view.x + this.view.w + pad && y > this.view.y - pad && y < this.view.y + this.view.h + pad;
   }
 
-  _drawTint(ctx) {
-    const t = this.dayNight.tint();
-    // multiply darken
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.fillStyle = rgb(t.r, t.g, t.b);
-    ctx.fillRect(0, 0, this.W, this.H);
-    ctx.globalCompositeOperation = 'source-over';
-    // subtle blue additive at deep night
-    const n = this.dayNight.night;
-    if (n > 0.3) { ctx.fillStyle = `rgba(20,30,70,${(n - 0.3) * 0.18})`; ctx.fillRect(0, 0, this.W, this.H); }
-  }
-
-  _drawWeather(ctx) {
-    const tile = this.world.tileInfoAtWorld(this.player.x, this.player.y);
-    if (!tile.cold) { this.snowFlakes.length = 0; return; }
-    if (this.snowFlakes.length === 0) for (let i = 0; i < 60; i++) this.snowFlakes.push({ x: Math.random() * this.W, y: Math.random() * this.H, s: rand(0.5, 1.6), v: rand(18, 40) });
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    for (const f of this.snowFlakes) {
-      f.y += f.v * 0.016; f.x += Math.sin((f.y + f.x) * 0.02) * 0.4;
-      if (f.y > this.H) { f.y = -4; f.x = Math.random() * this.W; }
-      ctx.fillRect(f.x, f.y, f.s, f.s);
+  _drawFloaters(ctx) {
+    if (!this.floaters.length) return;
+    const z = this.zoom, view = this.view;
+    ctx.textAlign = 'center';
+    for (const f of this.floaters) {
+      const sx = (f.x - view.x) * z, sy = (f.y - view.y) * z;
+      if (sx < -20 || sx > this.W + 20 || sy < -20 || sy > this.H + 20) continue;
+      ctx.globalAlpha = clamp(f.life / f.max, 0, 1);
+      ctx.font = `bold ${f.size}px monospace`;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillText(f.text, sx + 1, sy + 1);
+      ctx.fillStyle = f.col; ctx.fillText(f.text, sx, sy);
     }
+    ctx.globalAlpha = 1;
   }
 
   _vignette(ctx) {

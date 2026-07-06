@@ -91,7 +91,7 @@ function generateWorld(seed) {
   const spawn = { x: spawnTX * TILE + TILE / 2, y: spawnTY * TILE + TILE / 2 };
 
   const objects = [];
-  const structures = { towers: [], shrines: [], camps: [], cookpots: [], chests: [], koroks: [] };
+  const structures = { towers: [], shrines: [], camps: [], cookpots: [], chests: [], koroks: [], talus: [] };
   const reserved = new Uint8Array(W * H); // 1 = don't scatter decor here
 
   function reserveArea(tx, ty, rad) {
@@ -212,6 +212,20 @@ function generateWorld(seed) {
     objects.push(chest);
     structures.chests.push(chest);
     reserveArea(p.tx, p.ty, 1);
+  }
+
+  // --- Stone Talus boss lairs (roam rocky/dry ground, awaken when approached) ---
+  for (let i = 0; i < 2; i++) {
+    for (let tries = 0; tries < 400; tries++) {
+      const p = findWalkable(false);
+      if (!p) break;
+      const tid = tiles[idx(p.tx, p.ty)];
+      if (tid !== T.ROCK && tid !== T.DIRT && tid !== T.GRASS_DARK && tid !== T.SAND) continue;
+      if (dist(p.wx, p.wy, spawn.x, spawn.y) < 42 * TILE) continue;
+      if (!farEnough(structures.talus, p.wx, p.wy, 60 * TILE)) continue;
+      structures.talus.push({ x: p.wx, y: p.wy, defeated: false });
+      break;
+    }
   }
 
   // --- Korok spots (a lone rock with a leaf; lift with E) ---

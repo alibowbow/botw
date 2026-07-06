@@ -151,16 +151,38 @@ body.touch #hint { display: none; }
 
 /* action cluster placement (right thumb) */
 #touch .actions .tbtn { position: absolute; }
-#touch .actions .atk  { right: 4px;   bottom: 4px;   width: 78px; height: 78px; font-size: 26px; background: rgba(70, 120, 90, 0.55); }
-#touch .actions .act  { right: 90px;  bottom: 14px;  width: 60px; height: 60px; background: rgba(70, 95, 140, 0.55); }
-#touch .actions .bow  { right: 12px;  bottom: 90px;  width: 56px; height: 56px; }
-#touch .actions .bomb { right: 84px;  bottom: 84px;  width: 52px; height: 52px; }
-#touch .actions .swap { right: 140px; bottom: 64px;  width: 46px; height: 46px; font-size: 16px; }
+#touch .actions .atk   { right: 4px;   bottom: 4px;   width: 78px; height: 78px; font-size: 26px; background: rgba(70, 120, 90, 0.55); }
+#touch .actions .act   { right: 90px;  bottom: 14px;  width: 60px; height: 60px; background: rgba(70, 95, 140, 0.55); }
+#touch .actions .dodge { right: 4px;   bottom: 88px;  width: 54px; height: 54px; font-size: 22px; background: rgba(110, 140, 175, 0.55); }
+#touch .actions .bow   { right: 66px;  bottom: 78px;  width: 50px; height: 50px; }
+#touch .actions .bomb  { right: 120px; bottom: 40px;  width: 48px; height: 48px; }
+#touch .actions .swap  { right: 150px; bottom: 96px;  width: 44px; height: 44px; font-size: 16px; }
 
 /* left helper + top buttons */
 #touch .lbtns .tbtn { width: 56px; height: 44px; border-radius: 12px; font-size: 13px; }
 #touch .lbtns .run.on { background: rgba(120, 190, 90, 0.8); }
 #touch .topbtns .tbtn { width: 54px; height: 40px; border-radius: 10px; font-size: 14px; }
+
+/* awaken button by the KI gauge (left-middle), dim until ready */
+#touch .awakenbtn {
+  position: absolute;
+  left: 34px;
+  top: calc(50% + 84px);
+  width: 52px; height: 52px;
+  font-size: 22px;
+  color: #ffe98a;
+  background: rgba(60, 50, 24, 0.5);
+  border-color: rgba(200, 170, 80, 0.4);
+  opacity: 0.45;
+}
+#touch .awakenbtn.ready {
+  opacity: 1;
+  background: rgba(150, 110, 30, 0.75);
+  border-color: rgba(255, 220, 120, 0.9);
+  box-shadow: 0 0 14px rgba(255, 210, 90, 0.7);
+  animation: awakenPulse 1s ease-in-out infinite;
+}
+@keyframes awakenPulse { 50% { box-shadow: 0 0 22px rgba(255, 220, 120, 0.95); } }
 
 @media (max-height: 460px) {
   #touch .joy { width: 108px; height: 108px; }
@@ -504,6 +526,7 @@ class TouchControls {
     const actions = document.createElement('div'); actions.className = 'actions'; root.appendChild(actions);
     this._btn(actions, 'atk', 'A', 'KeyJ');    // attack
     this._btn(actions, 'act', 'E', 'KeyE');    // interact / activate
+    this._btn(actions, 'dodge', '↻', 'Space'); // dodge roll
     this._btn(actions, 'bow', '➹', 'KeyK');    // bow
     this._btn(actions, 'bomb', '✸', 'KeyB');   // bomb
     this._btn(actions, 'swap', '⟳', 'KeyQ');   // cycle weapon
@@ -512,6 +535,10 @@ class TouchControls {
     const left = document.createElement('div'); left.className = 'lbtns'; root.appendChild(left);
     this._btn(left, 'run', 'RUN', 'ShiftLeft', { toggle: true }); // sprint (toggle)
     this._btn(left, 'eat', 'EAT', 'KeyF');
+
+    // --- awaken button by the power gauge (only lights up when ready) ---
+    this.awakenBtn = this._btn(root, 'awaken', '⚡', 'KeyR');
+    this.awakenBtn.classList.add('awakenbtn');
 
     // --- top-right system buttons ---
     const top = document.createElement('div'); top.className = 'topbtns'; root.appendChild(top);
@@ -596,6 +623,7 @@ class TouchControls {
   sync(state) {
     if (!this.enabled) return;
     this.root.classList.toggle('ingame', state === 'playing');
+    if (this.awakenBtn && this.game.player) this.awakenBtn.classList.toggle('ready', this.game.player.canAwaken() || this.game.player.awaken > 0);
     if (state !== 'playing') { this.input.touchMove.x = 0; this.input.touchMove.y = 0; if (this.knob) this.knob.style.transform = 'translate(0,0)'; }
   }
 }
@@ -1318,7 +1346,7 @@ function generateWorld(seed) {
   const spawn = { x: spawnTX * TILE + TILE / 2, y: spawnTY * TILE + TILE / 2 };
 
   const objects = [];
-  const structures = { towers: [], shrines: [], camps: [], cookpots: [], chests: [], koroks: [] };
+  const structures = { towers: [], shrines: [], camps: [], cookpots: [], chests: [], koroks: [], talus: [] };
   const reserved = new Uint8Array(W * H); // 1 = don't scatter decor here
 
   function reserveArea(tx, ty, rad) {
@@ -1439,6 +1467,20 @@ function generateWorld(seed) {
     objects.push(chest);
     structures.chests.push(chest);
     reserveArea(p.tx, p.ty, 1);
+  }
+
+  // --- Stone Talus boss lairs (roam rocky/dry ground, awaken when approached) ---
+  for (let i = 0; i < 2; i++) {
+    for (let tries = 0; tries < 400; tries++) {
+      const p = findWalkable(false);
+      if (!p) break;
+      const tid = tiles[idx(p.tx, p.ty)];
+      if (tid !== T.ROCK && tid !== T.DIRT && tid !== T.GRASS_DARK && tid !== T.SAND) continue;
+      if (dist(p.wx, p.wy, spawn.x, spawn.y) < 42 * TILE) continue;
+      if (!farEnough(structures.talus, p.wx, p.wy, 60 * TILE)) continue;
+      structures.talus.push({ x: p.wx, y: p.wy, defeated: false });
+      break;
+    }
   }
 
   // --- Korok spots (a lone rock with a leaf; lift with E) ---
@@ -1740,9 +1782,9 @@ class World {
     });
   }
 
-  drawObject(ctx, o) {
+  drawObject(ctx, o, t) {
     const sb = this.sprites;
-    let name = o.type, feetOK = true;
+    let name = o.type;
     if (o.type === 'chest') name = o.opened ? 'chestOpen' : 'chest';
     else if (o.type === 'shrine') name = (o.ref && o.ref.activated) ? 'shrineOn' : 'shrine';
     else if (o.type === 'korokRock') name = 'rock';
@@ -1754,6 +1796,22 @@ class World {
       ctx.beginPath();
       ctx.ellipse(o.x, o.y + 1, (o.r || 6) * 1.2, (o.r || 6) * 0.55, 0, 0, TAU);
       ctx.fill();
+    }
+    // gentle wind sway for foliage (skew the top of the sprite)
+    const sways = (o.type === 'grass' || o.type === 'flower' || o.type === 'bush' || o.type === 'tree' || o.type === 'pine');
+    if (sways && t !== undefined) {
+      const amt = (o.type === 'tree' || o.type === 'pine') ? 0.05 : 0.14;
+      const sw = Math.sin(t * 1.6 + o.x * 0.05 + o.y * 0.03) * amt;
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      ctx.transform(1, 0, sw, 1, 0, 0); // horizontal shear grows toward the top
+      ctx.drawImage(cv, Math.round(-cv.width / 2), Math.round(-cv._feetY));
+      ctx.restore();
+      if (o.type === 'korokRock' && !o.done) {
+        ctx.fillStyle = '#4f8a3f';
+        ctx.beginPath(); ctx.ellipse(o.x + 3, o.y - 8, 2, 4, 0.5, 0, TAU); ctx.fill();
+      }
+      return;
     }
     ctx.drawImage(cv, Math.round(o.x - cv.width / 2), Math.round(o.y - cv._feetY));
     // korok leaf hint on the rock
@@ -1767,8 +1825,9 @@ class World {
 
 /* ===== js/entities/weapons.js ===== */
 'use strict';
-/* weapons.js — melee weapon archetypes. dmg in hearts-equivalent,
-   reach in world px, arc in radians (hit sector width), dur = durability. */
+/* weapons.js — melee weapon archetypes plus optional elemental variants.
+   dmg in hearts-equivalent, reach in world px, arc in radians, dur = durability.
+   An elemental key looks like "claymore_fire" (base "_" element). */
 
 const WEAPONS = {
   fists:    { name: 'Bare Hands',        type: 'fists',    icon: 'sword',    dmg: 1, dur: Infinity, maxDur: Infinity, reach: 16, arc: 1.4, swing: 0.26, knock: 60 },
@@ -1777,9 +1836,32 @@ const WEAPONS = {
   spear:    { name: "Traveler's Spear",  type: 'spear',    icon: 'spear',    dmg: 4, dur: 28, maxDur: 28, reach: 36, arc: 0.7, swing: 0.24, knock: 110 },
 };
 
+const ELEMENTS = {
+  fire:  { name: 'Flameblade', col: '#ff7a3a', dmg: 2, dur: 8 },
+  ice:   { name: 'Frostspire', col: '#7ad0ff', dmg: 1, dur: 8 },
+  shock: { name: 'Thunderstorm', col: '#ffe14a', dmg: 3, dur: 8 },
+};
+
 function makeWeapon(key) {
-  const w = WEAPONS[key] || WEAPONS.sword;
-  return { key, name: w.name, type: w.type, icon: w.icon, dmg: w.dmg, dur: w.dur, maxDur: w.maxDur, reach: w.reach, arc: w.arc, swing: w.swing, knock: w.knock };
+  let base = key, element = null;
+  const us = key.indexOf('_');
+  if (us > 0) { base = key.slice(0, us); element = key.slice(us + 1); }
+  const w = WEAPONS[base] || WEAPONS.sword;
+  const wep = {
+    key, name: w.name, type: base, icon: w.icon,
+    dmg: w.dmg, dur: w.dur, maxDur: w.maxDur, reach: w.reach, arc: w.arc, swing: w.swing, knock: w.knock,
+    element: null, elemCol: null,
+  };
+  const E = element && ELEMENTS[element];
+  if (E) {
+    wep.element = element;
+    wep.elemCol = E.col;
+    wep.name = E.name + ' ' + w.name;
+    wep.dmg = w.dmg + E.dmg;
+    wep.dur = w.dur + E.dur;
+    wep.maxDur = (isFinite(w.maxDur) ? w.maxDur : 0) + E.dur;
+  }
+  return wep;
 }
 
 
@@ -1822,6 +1904,9 @@ class Particles {
   }
   heal(x, y) {
     for (let i = 0; i < 8; i++) this._add(x + rand(-6, 6), y + rand(-2, 8), rand(-6, 6), rand(-40, -18), rand(0.6, 1.1), 'rgba(120,240,150,0.9)', rand(1.5, 3), -20);
+  }
+  aura(x, y) {
+    this._add(x, y + rand(-2, 8), rand(-10, 10), rand(-56, -26), rand(0.4, 0.85), 'rgba(255,224,120,0.9)', rand(1.5, 3.2), -34);
   }
   explosion(x, y) {
     for (let i = 0; i < 26; i++) { const a = Math.random() * TAU, s = rand(40, 180); this._add(x, y, Math.cos(a) * s, Math.sin(a) * s, rand(0.3, 0.7), i % 3 === 0 ? 'rgba(255,210,120,0.95)' : 'rgba(255,130,50,0.95)', rand(3, 6), 20); }
@@ -1928,6 +2013,7 @@ class Projectile {
             this.dead = true; return;
           }
         }
+        if (game.boss && game.boss.alive && game.boss.projHit(this.x, this.y, this.dmg, game)) { this.dead = true; return; }
       }
     }
     this.spin += dt * 10;
@@ -2017,6 +2103,16 @@ class Player {
     this.stepTimer = 0;
     this.swimSplashT = 0;
     this.toastCd = 0;
+
+    // combat depth
+    this.dodgeT = 0;       // active dodge-roll timer
+    this.dodgeCd = 0;
+    this.dodgeDir = { x: 1, y: 0 };
+    this.flurry = 0;       // flurry-rush bonus window (seconds)
+    // awakening (Super Saiyan)
+    this.awaken = 0;       // seconds of transformation left
+    this.awakenMeter = 0;  // 0..1 charge
+    this.auraT = 0;
   }
 
   get weapon() { return this.weapons[this.wi]; }
@@ -2041,6 +2137,43 @@ class Player {
     this.wi = (this.wi + dir + this.weapons.length) % this.weapons.length;
   }
 
+  awakenGain(amt) { if (this.awaken <= 0) this.awakenMeter = clamp(this.awakenMeter + amt, 0, 1); }
+  canAwaken() { return this.awaken <= 0 && this.awakenMeter >= 1; }
+
+  awakenActivate(game) {
+    if (!this.canAwaken()) {
+      if (this.toastCd <= 0) { game.toast(this.awaken > 0 ? 'Already awakened!' : 'Awaken meter not full.'); this.toastCd = 2; }
+      return;
+    }
+    this.awaken = 12; this.awakenMeter = 0;
+    this.invuln = Math.max(this.invuln, 0.8);
+    this.stamina = this.maxStamina; this.staminaLock = false;
+    game.audio.play('activate'); game.shake(9);
+    game.addLight(this.x, this.y, 240, [255, 210, 90], 0.9);
+    game.particles.burst(this.x, this.y - 4, '#ffe27a', 34);
+    game.startSlowmo(0.5, 0.4);
+    game.toast('⚡ AWAKENING! Power surges through you!');
+    for (const e of game.enemies) if (e.alive && dist(this.x, this.y, e.x, e.y) < 92) { const k = angleTo(this.x, this.y, e.x, e.y); e.damage(4, Math.cos(k), Math.sin(k), 320, game); }
+  }
+
+  _dodge(game) {
+    if (this.dodgeCd > 0 || this.dodgeT > 0 || this.state !== 'normal') return;
+    if (this.stamina < 0.12 && this.awaken <= 0) return;
+    this.dodgeT = 0.26; this.dodgeCd = 0.5;
+    const mv = game.input.moveVector();
+    let dx = mv.x, dy = mv.y;
+    if (dx === 0 && dy === 0) { const f = vecFromFacing(this.facing); dx = f.x; dy = f.y; }
+    const l = Math.hypot(dx, dy) || 1; this.dodgeDir = { x: dx / l, y: dy / l };
+    this.invuln = Math.max(this.invuln, 0.3);
+    if (this.awaken <= 0) this._drainStamina(0.12, game);
+    game.particles.dustRing(this.x, this.y + 4);
+    game.audio.play('swing');
+    let threat = false;
+    for (const e of game.enemies) if (e.alive && e.aggro && dist(this.x, this.y, e.x, e.y) < 36) { threat = true; break; }
+    if (game.boss && dist(this.x, this.y, game.boss.x, game.boss.y) < game.boss.rad + 30) threat = true;
+    if (threat) { this.flurry = 1.5; game.startSlowmo(1.4, 0.32); game.toast('Flurry Rush!'); game.addFloater(this.x, this.y - 16, 'DODGE!', '#8fd0ff', { size: 14 }); }
+  }
+
   update(dt, game) {
     if (this.state === 'dead') { this.deadTimer -= dt; return; }
     this.attackCd = Math.max(0, this.attackCd - dt);
@@ -2048,8 +2181,36 @@ class Player {
     this.invuln = Math.max(0, this.invuln - dt);
     this.coldResist = Math.max(0, this.coldResist - dt);
     this.toastCd = Math.max(0, this.toastCd - dt);
+    this.dodgeCd = Math.max(0, this.dodgeCd - dt);
+    this.flurry = Math.max(0, this.flurry - dt);
+
+    // awakening upkeep
+    if (this.awaken > 0) {
+      this.awaken -= dt;
+      this.stamina = this.maxStamina; this.staminaLock = false;
+      this.health = Math.min(this.maxHearts, this.health + dt * 0.35); // slow regen
+      this.auraT -= dt;
+      if (this.auraT <= 0) { this.auraT = 0.05; game.particles.aura(this.x + rand(-6, 6), this.y + rand(-4, 8)); }
+      if (this.awaken <= 0) { game.toast('Awakening faded.'); game.particles.burst(this.x, this.y - 4, '#ffe27a', 12); }
+    }
+
+    // activate awakening
+    if (game.input.wasPressed('KeyR')) this.awakenActivate(game);
 
     if (this.state === 'glide') { this._updateGlide(dt, game); return; }
+
+    // --- dodge roll (overrides normal movement while active) ---
+    if (game.input.wasPressed('Space') && this.state === 'normal') this._dodge(game);
+    if (this.dodgeT > 0) {
+      this.dodgeT -= dt;
+      const spd = (this.awaken > 0 ? 300 : 250);
+      const res = game.world.moveCircle(this.x, this.y, this.rad, this.dodgeDir.x * spd * dt, this.dodgeDir.y * spd * dt, { deepSolid: true });
+      this.x = res.x; this.y = res.y;
+      this.walkPhase += dt * 20;
+      if (Math.random() < 0.5) game.particles.dust(this.x, this.y + 4, 0.5);
+      this._postMoveCommon(dt, game, game.world.tileInfoAtWorld(this.x, this.y), false);
+      return;
+    }
 
     // --- knockback decay ---
     if (Math.abs(this.kbx) > 1 || Math.abs(this.kby) > 1) {
@@ -2148,6 +2309,7 @@ class Player {
         speed = 72;
       }
       speed *= tile.speed || 1;
+      if (this.awaken > 0) speed *= 1.4; // awakening boosts movement
       const res = game.world.moveCircle(this.x, this.y, this.rad, mv.x * speed * dt, mv.y * speed * dt, { deepSolid: false, cliffSolid: true });
       this.x = res.x; this.y = res.y;
       if (moving) {
@@ -2218,14 +2380,14 @@ class Player {
     this.walkPhase += dt * 3;
     if (Math.random() < 0.3) game.particles.dust(this.x + rand(-6, 6), this.y + 10, 0.4);
     // land on press or when timer ends over walkable ground
-    const wantLand = input.wasPressed('KeyE', 'Space');
+    const wantLand = input.wasPressed('KeyE');
     const groundOK = !game.world.tileInfoAtWorld(this.x, this.y).deep && !game.world.tileInfoAtWorld(this.x, this.y).solid;
     if ((this.glideT <= 0 && groundOK) || (wantLand && groundOK)) {
       this.state = 'normal';
       game.particles.dustRing(this.x, this.y + 4);
       // Consume the land press so the same edge can't also fire an interaction
       // (e.g. re-launching the glide) later this frame.
-      if (wantLand) input.consume('KeyE', 'Space');
+      if (wantLand) input.consume('KeyE');
     } else if (this.glideT <= -6) {
       // forced landing (nudge to nearest walkable)
       this.state = 'normal';
@@ -2270,6 +2432,7 @@ class Player {
     this.hitSet = new Set();
     this.swingArc = -w.arc / 2;
     this.swingWeapon = w; // lock stats for this swing even if the weapon breaks now
+    this._swingId = (this._swingId || 0) + 1;
     game.audio.play('swing');
     // durability
     if (w.type !== 'fists' && isFinite(w.dur)) {
@@ -2289,6 +2452,8 @@ class Player {
     const t = 1 - this.attackT / w.swing; // 0..1 through swing
     this.swingArc = lerp(-w.arc / 2, w.arc / 2, t);
     const ang = this.aim;
+    const dmgMul = (this.awaken > 0 ? 2 : 1) * (this.flurry > 0 ? 2 : 1);
+    const dmg = w.dmg * dmgMul;
     for (const e of game.enemies) {
       if (!e.alive || this.hitSet.has(e)) continue;
       const d = dist(this.x, this.y, e.x, e.y);
@@ -2297,11 +2462,19 @@ class Player {
       if (Math.abs(angDiff(ang, toE)) <= w.arc / 2 + 0.15) {
         this.hitSet.add(e);
         const kx = Math.cos(toE), ky = Math.sin(toE);
-        e.damage(w.dmg, kx, ky, w.knock, game);
+        e.damage(dmg, kx, ky, w.knock, game);
+        if (w.element && e.alive) e.applyStatus(w.element, game);
         game.audio.play('hit');
         game.particles.hit(e.x, e.y);
+        if (w.elemCol) game.particles.burst(e.x, e.y - 2, w.elemCol, 6);
         game.hitStop(0.05);
+        game.addCombo(1);
       }
+    }
+    // boss weak-point (armoured body just clangs)
+    if (game.boss && !this.hitSet.has(game.boss)) {
+      const hit = game.boss.meleeHit(this, { dmg, reach: w.reach, arc: w.arc, element: w.element }, game, this._swingId);
+      if (hit) { this.hitSet.add(game.boss); game.addCombo(1); }
     }
     // cut grass / hit boulders in arc
     game.world.forEachObjectIn(this.x - w.reach - 8, this.y - w.reach - 8, this.x + w.reach + 8, this.y + w.reach + 8, (o) => {
@@ -2398,6 +2571,25 @@ class Player {
     if (!swim && !glide) {
       ctx.fillStyle = 'rgba(0,0,0,0.22)';
       ctx.beginPath(); ctx.ellipse(x, y + 6, 6, 3, 0, 0, TAU); ctx.fill();
+    }
+
+    // awakening: golden flame aura around Link
+    if (this.awaken > 0) {
+      const tt = game._time;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 7; i++) {
+        const a = i / 7 * TAU + tt * 4;
+        const rr = 11 + Math.sin(tt * 12 + i) * 3;
+        ctx.fillStyle = `rgba(255,${200 + (i % 2) * 40},90,0.5)`;
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(a) * 6, y - 2 + Math.sin(a) * 6);
+        ctx.lineTo(x + Math.cos(a) * rr, y - 2 + Math.sin(a) * rr);
+        ctx.lineTo(x + Math.cos(a + 0.4) * 6, y - 2 + Math.sin(a + 0.4) * 6);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
     }
 
     // flashing on i-frames
@@ -2554,12 +2746,22 @@ class Enemy {
     this.camp = null; // reference to camp if part of one
     this.attackWind = 0;
     this.alertPing = 0;
+    this.status = null; this.statusT = 0; this.burnTick = 0; // fire/ice/shock
+    this.isWanderer = false;
   }
 
   get alive() { return this.state !== 'dead'; }
+  get disabled() { return this.statusT > 0 && (this.status === 'ice' || this.status === 'shock'); }
+
+  applyStatus(element, game) {
+    if (element === 'fire') { this.status = 'fire'; this.statusT = 3; this.burnTick = 0.4; }
+    else if (element === 'ice') { this.status = 'ice'; this.statusT = 1.6; game.particles.burst(this.x, this.y - 2, '#7ad0ff', 6); }
+    else if (element === 'shock') { this.status = 'shock'; this.statusT = 0.9; game.particles.burst(this.x, this.y - 2, '#ffe14a', 8); }
+  }
 
   damage(dmg, kx, ky, knock, game) {
     if (this.state === 'dead') return;
+    if (this.status === 'ice' && this.statusT > 0) dmg *= 1.5; // frozen foes take extra
     this.hp -= dmg;
     this.flash = 0.12;
     this.hurtT = 0.22;
@@ -2567,6 +2769,7 @@ class Enemy {
     const l = Math.hypot(kx, ky) || 1;
     this.kbx += (kx / l) * knock; this.kby += (ky / l) * knock;
     game.particles.hit(this.x, this.y - 4);
+    if (game.addFloater) game.addFloater(this.x, this.y - 8, Math.max(1, Math.round(dmg)), '#ffe27a', { size: 13 });
     if (this.hp <= 0) this._die(game);
   }
 
@@ -2588,6 +2791,16 @@ class Enemy {
     this.shootCd = Math.max(0, this.shootCd - dt);
     this.alertPing = Math.max(0, this.alertPing - dt);
 
+    // elemental status
+    if (this.statusT > 0) {
+      this.statusT -= dt;
+      if (this.status === 'fire') {
+        this.burnTick -= dt;
+        if (this.burnTick <= 0) { this.burnTick = 0.4; this.hp -= 1; game.particles.burst(this.x, this.y - 4, '#ff7a3a', 3); if (game.addFloater) game.addFloater(this.x, this.y - 6, '1', '#ff9a4a', { size: 10 }); if (this.hp <= 0) { this._die(game); return; } }
+      }
+      if (this.statusT <= 0) this.status = null;
+    }
+
     // knockback
     if (Math.abs(this.kbx) > 2 || Math.abs(this.kby) > 2) {
       const opts = { deepSolid: !this.def.fly };
@@ -2596,6 +2809,7 @@ class Enemy {
       this.kbx *= Math.pow(0.0005, dt); this.kby *= Math.pow(0.0005, dt);
     }
     if (this.hurtT > 0) return; // stunned
+    if (this.disabled) return;  // frozen / shocked: cannot act
 
     const d = dist(this.x, this.y, p.x, p.y);
     const canSee = p.alive && d < this.def.sight && p.state !== 'glide';
@@ -2827,14 +3041,14 @@ class Pickup {
       case 'meat': p.addFood('meat'); game.audio.play('pickup'); break;
       case 'mushroom': p.addFood('mushroom'); game.audio.play('pickup'); break;
       case 'korok': p.koroks += 1; game.audio.play('korok'); game.toast('Ya-ha-ha! Korok seeds: ' + p.koroks); break;
-      case 'weapon': p.giveWeapon(this.key); game.audio.play('pickup'); game.toast('Got ' + (WEAPONS[this.key] ? WEAPONS[this.key].name : 'a weapon') + '!'); break;
+      case 'weapon': p.giveWeapon(this.key); game.audio.play('pickup'); game.toast('Got ' + makeWeapon(this.key).name + '!'); break;
       default: game.audio.play('pickup');
     }
     game.particles.spark(this.x, this.y);
   }
 
   draw(ctx, game) {
-    const iconName = this.type === 'weapon' ? (WEAPONS[this.key] ? WEAPONS[this.key].icon : 'sword') : PICKUP_ICON[this.type];
+    const iconName = this.type === 'weapon' ? makeWeapon(this.key).icon : PICKUP_ICON[this.type];
     const icon = game.sprites.icon[iconName];
     const bobY = Math.sin(this.bob) * 1.5;
     const yy = this.y - this.z - bobY;
@@ -2854,6 +3068,219 @@ class Pickup {
     if (!this.persistent && this.life < 5 && Math.floor(this.life * 6) % 2 === 0) {
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
       ctx.fillRect(this.x - 8, yy - 8, 16, 16);
+    }
+  }
+}
+
+
+/* ===== js/entities/boss.js ===== */
+'use strict';
+/* boss.js — Stone Talus: a hulking rock golem. Its body is armoured (melee just
+   clangs); damage lands only on the glowing ore weak-point that rotates around
+   it. It stomps a shockwave and hurls boulders. Beating it grants a Heart
+   Container and a mighty elemental weapon. */
+
+class Boss {
+  constructor(x, y, game, ref) {
+    this.x = x; this.y = y;
+    this.ref = ref;             // the world talus marker
+    this.rad = 26;
+    this.maxHp = 140; this.hp = 140;
+    this.state = 'active';      // active | slam | hurt | dead
+    this.dead = false; this.deadT = 0;
+    this.oreAng = 0;            // ore orbit angle
+    this.oreDist = 26;
+    this.bodyBob = 0;
+    this.moveT = 0; this.mvx = 0; this.mvy = 0;
+    this.attackT = rand(2, 4);
+    this.slamT = 0;             // slam windup timer
+    this.flash = 0;
+    this.hurtT = 0;
+    this.hitBy = null;          // swing id already applied
+    this.rageShown = false;
+  }
+
+  get alive() { return this.state !== 'dead'; }
+  orePos() { return { x: this.x + Math.cos(this.oreAng) * this.oreDist, y: this.y - 10 + Math.sin(this.oreAng) * this.oreDist * 0.5 }; }
+
+  update(dt, game) {
+    if (this.state === 'dead') { this.deadT -= dt; return; }
+    const p = game.player;
+    this.bodyBob += dt * 3;
+    this.flash = Math.max(0, this.flash - dt);
+    this.hurtT = Math.max(0, this.hurtT - dt);
+    // ore rotates faster when enraged (low hp)
+    const rage = this.hp < this.maxHp * 0.4;
+    this.oreAng += dt * (rage ? 1.1 : 0.6);
+    if (rage && !this.rageShown) { this.rageShown = true; game.toast('The Talus is enraged!'); game.shake(6); }
+
+    const d = dist(this.x, this.y, p.x, p.y);
+
+    // slow lumbering pursuit
+    this.moveT -= dt;
+    if (this.moveT <= 0) { this.moveT = rand(1.5, 3); const a = angleTo(this.x, this.y, p.x, p.y) + rand(-0.6, 0.6); this.mvx = Math.cos(a); this.mvy = Math.sin(a); }
+    if (this.state === 'active') {
+      const sp = rage ? 26 : 18;
+      const res = game.world.moveCircle(this.x, this.y, this.rad, this.mvx * sp * dt, this.mvy * sp * dt, { deepSolid: true });
+      this.x = res.x; this.y = res.y;
+    }
+
+    // attacks
+    this.attackT -= dt;
+    if (this.state === 'active' && this.attackT <= 0) {
+      if (d < 90) { this.state = 'slam'; this.slamT = 0.8; }
+      else { this._throw(game); this.attackT = rand(2.2, 3.5); }
+    }
+    if (this.state === 'slam') {
+      this.slamT -= dt;
+      if (this.slamT <= 0) {
+        this.state = 'active'; this.attackT = rand(2.5, 4);
+        game.shake(10); game.audio.play('explode');
+        game.particles.explosion(this.x, this.y + 8);
+        game.addLight(this.x, this.y, 120, [200, 170, 120], 0.3);
+        // shockwave ring damage
+        if (p.alive && dist(this.x, this.y, p.x, p.y) < 74) {
+          const k = angleTo(this.x, this.y, p.x, p.y);
+          p.damage(1.5, Math.cos(k), Math.sin(k), game);
+        }
+      }
+    }
+
+    // contact shove
+    if (p.alive && circlesOverlap(this.x, this.y, this.rad, p.x, p.y, p.rad) && p.invuln <= 0) {
+      const k = angleTo(this.x, this.y, p.x, p.y);
+      p.damage(1, Math.cos(k), Math.sin(k), game);
+    }
+  }
+
+  _throw(game) {
+    const p = game.player;
+    const a = angleTo(this.x, this.y - 10, p.x, p.y);
+    const pr = new Projectile(this.x, this.y - 14, a, 'rock', game);
+    pr.fromEnemy = true; pr.dmg = 1.25; pr.rad = 6;
+    pr.vx = Math.cos(a) * 130; pr.vy = Math.sin(a) * 130;
+    game.spawnProjectile(pr);
+    game.audio.play('bomb');
+  }
+
+  // melee from the player. Returns true if the ore was struck.
+  meleeHit(player, w, game, swingId) {
+    if (this.state === 'dead') return false;
+    if (this.hitBy === swingId) return false;
+    const ore = this.orePos();
+    const ang = player.aim;
+    // must be facing the ore and within reach
+    const dOre = dist(player.x, player.y, ore.x, ore.y);
+    const toOre = angleTo(player.x, player.y, ore.x, ore.y);
+    const dBody = dist(player.x, player.y, this.x, this.y);
+    if (dOre < w.reach + 10 && Math.abs(angDiff(ang, toOre)) < w.arc / 2 + 0.4) {
+      this.hitBy = swingId;
+      this._takeDamage(w.dmg * 2, ore.x, ore.y, game);
+      return true;
+    }
+    // hitting the armoured body just clangs
+    if (dBody < w.reach + this.rad && Math.abs(angDiff(ang, angleTo(player.x, player.y, this.x, this.y))) < w.arc / 2 + 0.3) {
+      this.hitBy = swingId;
+      game.particles.spark(player.x + Math.cos(ang) * this.rad, player.y + Math.sin(ang) * this.rad);
+      game.audio.play('break');
+      game.addFloater(this.x, this.y - 30, 'clang!', '#c8c8c8', { size: 11 });
+    }
+    return false;
+  }
+
+  // arrow / projectile hit test (called from Projectile)
+  projHit(px, py, dmg, game) {
+    if (this.state === 'dead') return false;
+    const ore = this.orePos();
+    if (dist(px, py, ore.x, ore.y) < 12) { this._takeDamage(dmg * 2, ore.x, ore.y, game); return true; }
+    if (dist(px, py, this.x, this.y) < this.rad) { game.particles.spark(px, py); return true; } // blocked by body
+    return false;
+  }
+
+  _takeDamage(amount, hx, hy, game) {
+    this.hp -= amount;
+    this.flash = 0.12; this.hurtT = 0.15;
+    game.particles.burst(hx, hy, '#f0c060', 12);
+    game.audio.play('hit');
+    game.hitStop(0.05); game.shake(4);
+    game.addFloater(hx, hy - 8, Math.round(amount), '#ffe27a', { size: 15 });
+    game.player.awakenGain(0.04);
+    if (this.hp <= 0) this._die(game);
+  }
+
+  _die(game) {
+    this.state = 'dead'; this.dead = true; this.deadT = 1.4;
+    if (this.ref) this.ref.defeated = true;
+    game.audio.play('enemyDie'); game.shake(12);
+    game.particles.explosion(this.x, this.y);
+    for (let i = 0; i < 5; i++) game.particles.burst(this.x + rand(-20, 20), this.y + rand(-16, 16), '#8b857e', 14);
+    // rewards
+    const p = game.player;
+    p.maxHearts++; p.heal(p.maxHearts);
+    game.toast('Stone Talus defeated! ♥ Heart Container obtained!');
+    const elem = game.rngPick(['fire', 'ice', 'shock']);
+    game.spawnPickup(this.x, this.y + 6, 'weapon', 'claymore_' + elem);
+    for (let i = 0; i < 6; i++) game.spawnPickup(this.x + rand(-20, 20), this.y + rand(-10, 10), 'rupeeR');
+    game.spawnPickup(this.x, this.y, 'heart');
+  }
+
+  draw(ctx, game) {
+    const x = Math.round(this.x), y = Math.round(this.y);
+    if (this.state === 'dead') {
+      ctx.globalAlpha = clamp(this.deadT / 1.4, 0, 1);
+    }
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.beginPath(); ctx.ellipse(x, y + 14, this.rad * 1.1, this.rad * 0.45, 0, 0, TAU); ctx.fill();
+
+    const lift = this.state === 'slam' ? -Math.sin((0.8 - this.slamT) / 0.8 * Math.PI) * 8 : 0;
+    const by = y + lift + Math.sin(this.bodyBob) * 1.2;
+    const flash = this.flash > 0;
+
+    // rocky body (cluster of boulders)
+    const base = flash ? '#efe8dc' : '#7d766e';
+    const lite = flash ? '#ffffff' : '#948d84';
+    ctx.fillStyle = base;
+    ctx.beginPath();
+    ctx.moveTo(x - this.rad, by + 10);
+    ctx.lineTo(x - this.rad + 4, by - this.rad);
+    ctx.lineTo(x - 6, by - this.rad - 6);
+    ctx.lineTo(x + 10, by - this.rad);
+    ctx.lineTo(x + this.rad, by - 4);
+    ctx.lineTo(x + this.rad - 3, by + 12);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = lite;
+    ctx.beginPath(); ctx.moveTo(x - 10, by - 14); ctx.lineTo(x + 4, by - 20); ctx.lineTo(x + 12, by - 8); ctx.lineTo(x - 2, by - 2); ctx.closePath(); ctx.fill();
+    // eyes
+    if (!flash) { ctx.fillStyle = '#ffcf3a'; ctx.fillRect(x - 8, by - 6, 3, 3); ctx.fillRect(x + 4, by - 6, 3, 3); }
+    // legs
+    ctx.fillStyle = flash ? '#efe8dc' : '#635d57';
+    ctx.fillRect(x - 14, by + 8, 7, 8); ctx.fillRect(x + 7, by + 8, 7, 8);
+
+    // ore weak-point
+    const ore = this.orePos();
+    const ox = Math.round(ore.x), oy = Math.round(ore.y + lift);
+    ctx.fillStyle = '#3a2a1a'; ctx.beginPath(); ctx.arc(ox, oy, 7, 0, TAU); ctx.fill();
+    const glow = 0.6 + Math.sin(game._time * 6) * 0.3;
+    ctx.fillStyle = `rgba(255,${120 + glow * 80 | 0},60,1)`;
+    ctx.beginPath(); ctx.arc(ox, oy, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#ffe0a0'; ctx.beginPath(); ctx.arc(ox - 1, oy - 1, 2, 0, TAU); ctx.fill();
+
+    // slam telegraph ring
+    if (this.state === 'slam') {
+      ctx.strokeStyle = `rgba(255,120,60,${0.4 + Math.sin(game._time * 30) * 0.3})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y + 6, 74, 0, TAU); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // hp bar
+    if (this.state !== 'dead') {
+      const bw = 120, bx = x - bw / 2, byy = y - this.rad - 34;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(bx - 2, byy - 2, bw + 4, 10);
+      ctx.fillStyle = '#5a4a3a'; ctx.fillRect(bx, byy, bw, 6);
+      ctx.fillStyle = '#e0642a'; ctx.fillRect(bx, byy, bw * clamp(this.hp / this.maxHp, 0, 1), 6);
+      ctx.fillStyle = '#e8eef2'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('STONE TALUS', x, byy - 5);
     }
   }
 }
@@ -3047,6 +3474,382 @@ class Spawner {
 }
 
 
+/* ===== js/systems/lighting.js ===== */
+'use strict';
+/* lighting.js — screen-space lighting. Builds a darkness layer each frame
+   (driven by day/night + weather) and punches soft light holes for the player
+   torch, fires, structures and transient flashes, then adds an emissive bloom
+   pass so fires/auras/shrines glow. Replaces the old flat night tint. */
+
+class Lighting {
+  constructor() {
+    this.dark = null; this.dctx = null; this._w = 0; this._h = 0;
+  }
+  _ensure(w, h) {
+    if (this.dark && this._w === w && this._h === h) return;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    this.dark = c; this.dctx = c.getContext('2d');
+    this._w = w; this._h = h;
+  }
+
+  // world -> screen (CSS px) using the game's current view + zoom
+  render(ctx, game) {
+    const W = game.W, H = game.H, z = game.zoom, view = game.view;
+    const night = game.dayNight.night;
+    const gloom = game.weather ? game.weather.gloom : 0;
+    const blood = game.dayNight.bloodMoon;
+    const darkness = clamp(night * 0.9 + gloom * 0.55, 0, 0.94);
+
+    // 1) gentle colour grade (dusk warmth / blood-moon red) via multiply
+    const t = game.dayNight.tint();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = rgb(t.r, t.g, t.b);
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+
+    const toX = (wx) => (wx - view.x) * z;
+    const toY = (wy) => (wy - view.y) * z;
+    const p = game.player;
+
+    // gather warm/coloured light points for bloom
+    const glows = [];
+    game.world.forEachObjectIn(view.x - 40, view.y - 40, view.x + view.w + 40, view.y + view.h + 40, (o) => {
+      if (o.dead) return;
+      if (o.type === 'campfire' || o.type === 'cookpot') glows.push({ x: o.x, y: o.y - 6, r: 82, col: [255, 168, 74], fire: true });
+      else if (o.type === 'tower') glows.push({ x: o.x, y: o.y - 88, r: 64, col: [90, 220, 210], fire: false });
+      else if (o.type === 'shrine' && o.ref && o.ref.activated) glows.push({ x: o.x, y: o.y - 14, r: 60, col: [80, 210, 255], fire: false });
+      else if (o.type === 'shrine') glows.push({ x: o.x, y: o.y - 14, r: 46, col: [224, 138, 58], fire: true });
+    });
+    for (const l of game.lights) glows.push({ x: l.x, y: l.y, r: l.r, col: l.col, transient: true, life: l.life / l.max });
+
+    // 2) darkness layer with light holes
+    if (darkness > 0.02) {
+      this._ensure(W, H);
+      const d = this.dctx;
+      d.setTransform(1, 0, 0, 1, 0, 0);
+      d.clearRect(0, 0, W, H);
+      // night colour
+      const nb = blood > 0.2 ? `rgba(30,6,10,${darkness})` : `rgba(8,12,30,${darkness})`;
+      d.fillStyle = nb; d.fillRect(0, 0, W, H);
+      d.globalCompositeOperation = 'destination-out';
+      // player torch (bigger + steadier during awakening)
+      const aw = p.awaken > 0;
+      const flick = 0.9 + Math.sin(game._time * 12) * 0.03 + Math.sin(game._time * 27) * 0.02;
+      this._hole(d, toX(p.x), toY(p.y), (aw ? 200 : 118) * z, (aw ? 0.98 : 0.9) * flick);
+      for (const g of glows) {
+        const fl = g.fire ? (0.88 + Math.sin(game._time * 10 + g.x) * 0.08) : 0.95;
+        const a = g.transient ? Math.min(1, g.life * 1.3) : 1;
+        this._hole(d, toX(g.x), toY(g.y), g.r * z, fl * a);
+      }
+      d.globalCompositeOperation = 'source-over';
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(this.dark, 0, 0, W, H);
+      ctx.imageSmoothingEnabled = false;
+    }
+
+    // 3) emissive bloom (additive)
+    ctx.globalCompositeOperation = 'lighter';
+    const bloomAmt = 0.35 + darkness * 0.5;
+    for (const g of glows) {
+      const [r, gg, b] = g.col;
+      const fl = g.fire ? (0.8 + Math.sin(game._time * 11 + g.y) * 0.15) : 1;
+      const a = (g.transient ? Math.min(1, g.life) : bloomAmt) * fl;
+      const rad = createGlowGrad(ctx, toX(g.x), toY(g.y), g.r * z * 0.9, r, gg, b, a);
+      ctx.fillStyle = rad;
+      ctx.fillRect(toX(g.x) - g.r * z, toY(g.y) - g.r * z, g.r * z * 2, g.r * z * 2);
+    }
+    // awakening gold aura bloom on the player
+    if (p.awaken > 0) {
+      const pulse = 0.5 + Math.sin(game._time * 8) * 0.12;
+      const rad = createGlowGrad(ctx, toX(p.x), toY(p.y - 4), 90 * z, 255, 210, 90, pulse);
+      ctx.fillStyle = rad;
+      ctx.fillRect(toX(p.x) - 90 * z, toY(p.y - 4) - 90 * z, 180 * z, 180 * z);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  _hole(d, x, y, r, strength) {
+    if (r <= 0) return;
+    const g = d.createRadialGradient(x, y, r * 0.12, x, y, r);
+    g.addColorStop(0, `rgba(0,0,0,${strength})`);
+    g.addColorStop(0.7, `rgba(0,0,0,${strength * 0.5})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    d.fillStyle = g;
+    d.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+}
+
+function createGlowGrad(ctx, x, y, r, red, green, blue, a) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${red|0},${green|0},${blue|0},${a})`);
+  g.addColorStop(0.5, `rgba(${red|0},${green|0},${blue|0},${a * 0.35})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  return g;
+}
+
+
+/* ===== js/systems/weather.js ===== */
+'use strict';
+/* weather.js — evolving weather: clear / cloudy / rain / storm / fog, plus
+   biome snow. Storms flash lightning and — BOTW-style — can strike a player who
+   is holding a metal weapon in the open. Exposes `gloom` for the light system. */
+
+const WEATHER_STATES = ['clear', 'clear', 'cloudy', 'rain', 'fog', 'storm'];
+const GLOOM = { clear: 0, cloudy: 0.14, rain: 0.32, storm: 0.5, fog: 0.4 };
+
+class Weather {
+  constructor(rng) {
+    this.rng = rng || new RNG(9001);
+    this.state = 'clear';
+    this.next = 'clear';
+    this.blend = 1;            // 0..1 transition toward `state`
+    this.timer = 40;
+    this.gloom = 0;
+    this.rainAmt = 0;
+    this.drops = [];
+    this.flash = 0;            // screen flash 0..1
+    this.thunderTimer = 0;
+    this.strikeTimer = 12;
+    this.strike = null;        // {t, x, y} pending bolt on the player
+    this.snow = [];
+  }
+
+  isWet() { return this.state === 'rain' || this.state === 'storm'; }
+
+  update(dt, game) {
+    this.timer -= dt;
+    if (this.timer <= 0) {
+      this.state = this.next;
+      this.next = this.rng.pick(WEATHER_STATES);
+      this.timer = this.rng.range(35, 80);
+      this.blend = 0;
+    }
+    this.blend = Math.min(1, this.blend + dt / 6);
+    const targetGloom = GLOOM[this.state] || 0;
+    this.gloom = approach(this.gloom, targetGloom, dt * 0.15);
+    const targetRain = (this.state === 'rain') ? 0.7 : (this.state === 'storm') ? 1 : 0;
+    this.rainAmt = approach(this.rainAmt, targetRain, dt * 0.6);
+    this.flash = Math.max(0, this.flash - dt * 2.2);
+
+    // ambient thunder flashes during a storm
+    if (this.state === 'storm') {
+      this.thunderTimer -= dt;
+      if (this.thunderTimer <= 0) {
+        this.thunderTimer = this.rng.range(4, 10);
+        this.flash = this.rng.range(0.5, 0.9);
+        game.audio.play('explode');
+      }
+      this._lightning(dt, game);
+    } else if (this.strike) {
+      this.strike = null;
+    }
+  }
+
+  _lightning(dt, game) {
+    const p = game.player;
+    if (this.strike) {
+      this.strike.t -= dt;
+      // cancel if the player stopped holding metal or became untargetable
+      if (!this._metal(p) || p.state === 'glide' || !p.alive) { this.strike = null; return; }
+      this.strike.x = p.x; this.strike.y = p.y;
+      if (this.strike.t <= 0) {
+        this.flash = 1;
+        game.audio.play('explode');
+        game.explode(p.x, p.y, 30, 0); // visual shock, no rock breaking damage
+        game.particles.burst(p.x, p.y - 4, '#bfe0ff', 22);
+        if (p.alive) p.damage(2, 0, -1, game); // a real jolt
+        game.addLight(p.x, p.y - 20, 160, [180, 220, 255], 0.4);
+        game.shake(9);
+        this._boltAt = { x: p.x, y: p.y, t: 0.25 };
+        this.strike = null;
+      }
+    } else {
+      this.strikeTimer -= dt;
+      if (this.strikeTimer <= 0) {
+        this.strikeTimer = this.rng.range(9, 18);
+        if (this._metal(p) && p.alive && p.state !== 'glide' && p.awaken <= 0) {
+          this.strike = { t: 1.3, x: p.x, y: p.y };
+          game.toast('⚡ Lightning is drawn to your metal weapon!');
+        }
+      }
+    }
+    if (this._boltAt) { this._boltAt.t -= dt; if (this._boltAt.t <= 0) this._boltAt = null; }
+  }
+
+  _metal(p) {
+    const w = p.weapon;
+    return w && (w.type === 'sword' || w.type === 'claymore' || w.type === 'spear');
+  }
+
+  // Drawn in screen space, after lighting.
+  render(ctx, game) {
+    const W = game.W, H = game.H;
+    const coldHere = game.world.tileInfoAtWorld(game.player.x, game.player.y).cold;
+
+    // rain
+    if (this.rainAmt > 0.02 && !coldHere) {
+      const n = Math.floor(this.rainAmt * 260);
+      if (this.drops.length < n) for (let i = this.drops.length; i < n; i++) this.drops.push({ x: Math.random() * (W + 60) - 30, y: Math.random() * H, v: rand(560, 820), len: rand(9, 18) });
+      this.drops.length = n;
+      ctx.strokeStyle = `rgba(170,195,225,${0.35 + this.rainAmt * 0.25})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const d of this.drops) {
+        d.y += d.v * 0.016; d.x += 2.2;
+        if (d.y > H) { d.y = -10; d.x = Math.random() * (W + 60) - 30; }
+        ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - 3, d.y + d.len);
+      }
+      ctx.stroke();
+    } else if (this.drops.length && coldHere) {
+      this.drops.length = 0;
+    }
+
+    // biome snow (independent of weather state)
+    if (coldHere) {
+      const target = 70;
+      if (this.snow.length < target) for (let i = this.snow.length; i < target; i++) this.snow.push({ x: Math.random() * W, y: Math.random() * H, s: rand(0.6, 1.8), v: rand(16, 40) });
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      for (const f of this.snow) {
+        f.y += f.v * 0.016; f.x += Math.sin((f.y + f.x) * 0.02) * 0.5;
+        if (f.y > H) { f.y = -4; f.x = Math.random() * W; }
+        ctx.fillRect(f.x, f.y, f.s, f.s);
+      }
+    } else if (this.snow.length) this.snow.length = 0;
+
+    // fog
+    if (this.state === 'fog' && this.blend > 0) {
+      const a = 0.28 * this.blend;
+      ctx.fillStyle = `rgba(200,206,214,${a})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // pending-strike telegraph on the player
+    if (this.strike) {
+      const z = game.zoom, view = game.view;
+      const sx = (this.strike.x - view.x) * z, sy = (this.strike.y - view.y) * z;
+      const k = 1 - this.strike.t / 1.3;
+      ctx.strokeStyle = `rgba(180,220,255,${0.5 + Math.sin(game._time * 30) * 0.4})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(sx, sy - 10 * z, (26 - k * 18) * z, 0, TAU); ctx.stroke();
+    }
+    // the bolt itself
+    if (this._boltAt && this._boltAt.t > 0) {
+      const z = game.zoom, view = game.view;
+      const sx = (this._boltAt.x - view.x) * z, sy = (this._boltAt.y - view.y) * z;
+      ctx.strokeStyle = 'rgba(220,240,255,0.95)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(sx, 0);
+      let y = 0;
+      while (y < sy) { y += H * 0.12; ctx.lineTo(sx + rand(-18, 18), Math.min(y, sy)); }
+      ctx.stroke();
+    }
+
+    // lightning flash
+    if (this.flash > 0.01) {
+      ctx.fillStyle = `rgba(220,235,255,${this.flash * 0.6})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+}
+
+
+/* ===== js/systems/ambient.js ===== */
+'use strict';
+/* ambient.js — living-world touches: butterflies by day, fireflies by night
+   (glowing in the dark), and animated shimmer on water. Purely decorative. */
+
+class Ambient {
+  constructor() {
+    this.critters = [];
+    this.n = 26;
+  }
+
+  _spawn(game, near) {
+    const view = game.view;
+    const m = 40;
+    return {
+      x: near ? near.x : view.x + Math.random() * view.w,
+      y: near ? near.y : view.y + Math.random() * view.h,
+      vx: rand(-14, 14), vy: rand(-10, 10),
+      ph: Math.random() * TAU, hue: Math.floor(rand(0, 5)),
+      blink: Math.random() * TAU,
+    };
+  }
+
+  update(dt, game) {
+    const view = game.view;
+    if (this.critters.length < this.n) for (let i = this.critters.length; i < this.n; i++) this.critters.push(this._spawn(game));
+    for (const c of this.critters) {
+      c.ph += dt * 3; c.blink += dt * 2;
+      c.vx += Math.sin(c.ph) * 6 * dt; c.vy += Math.cos(c.ph * 0.7) * 5 * dt;
+      c.vx = clamp(c.vx, -22, 22); c.vy = clamp(c.vy, -18, 18);
+      c.x += c.vx * dt; c.y += c.vy * dt;
+      // recycle when it drifts off the padded view
+      if (c.x < view.x - 60 || c.x > view.x + view.w + 60 || c.y < view.y - 60 || c.y > view.y + view.h + 60) {
+        const s = this._spawn(game);
+        c.x = s.x; c.y = s.y; c.vx = s.vx; c.vy = s.vy;
+      }
+    }
+  }
+
+  // butterflies in world space (drawn with the world transform, daytime)
+  drawDay(ctx, game) {
+    if (game.dayNight.night > 0.55) return;
+    const cols = ['#e46b9a', '#e8d24a', '#7aa6e8', '#f0864a', '#9a6be4'];
+    for (const c of this.critters) {
+      const t = game.world.tileInfoAtWorld(c.x, c.y);
+      if (t.deep || t.solid) continue;
+      const flap = Math.abs(Math.sin(c.ph * 4));
+      ctx.fillStyle = cols[c.hue];
+      const w = 1.4 + flap * 2.2;
+      ctx.beginPath(); ctx.ellipse(c.x - w, c.y, w, 2.4, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(c.x + w, c.y, w, 2.4, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#2a2320'; ctx.fillRect(c.x - 0.5, c.y - 1.5, 1, 3);
+    }
+  }
+
+  // fireflies in screen space (additive, after lighting so they glow at night)
+  drawGlow(ctx, game) {
+    if (game.dayNight.night < 0.45) return;
+    const z = game.zoom, view = game.view;
+    ctx.globalCompositeOperation = 'lighter';
+    for (const c of this.critters) {
+      const t = game.world.tileInfoAtWorld(c.x, c.y);
+      if (t.deep) continue;
+      const b = 0.4 + Math.sin(c.blink) * 0.5;
+      if (b <= 0.05) continue;
+      const sx = (c.x - view.x) * z, sy = (c.y - view.y) * z;
+      const r = 7 * z;
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+      g.addColorStop(0, `rgba(200,255,150,${b})`);
+      g.addColorStop(1, 'rgba(160,255,120,0)');
+      ctx.fillStyle = g; ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // shimmering highlights on visible water (world space, after terrain)
+  drawWater(ctx, game) {
+    const view = game.view, t = game._time;
+    const tx0 = Math.floor(view.x / TILE), tx1 = Math.floor((view.x + view.w) / TILE);
+    const ty0 = Math.floor(view.y / TILE), ty1 = Math.floor((view.y + view.h) / TILE);
+    ctx.strokeStyle = 'rgba(220,240,255,0.5)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let ty = ty0; ty <= ty1; ty += 2) {
+      for (let tx = tx0; tx <= tx1; tx += 2) {
+        const info = TILES[game.world.tileIdAt(tx, ty)];
+        if (!info || (!info.deep && !info.shallow)) continue;
+        const wob = Math.sin(t * 2 + tx * 0.7 + ty * 1.3);
+        if (wob < 0.4) continue;
+        const x = tx * TILE + 3 + wob * 3, y = ty * TILE + 8 + Math.sin(t + tx) * 2;
+        ctx.moveTo(x, y); ctx.lineTo(x + 5, y);
+      }
+    }
+    ctx.stroke();
+  }
+}
+
+
 /* ===== js/ui/hud.js ===== */
 'use strict';
 /* hud.js — heads-up display drawn in screen space: hearts, stamina wheel,
@@ -3070,11 +3873,62 @@ class HUD {
     const wY = touch ? (16 + Math.ceil(p.maxHearts / 10) * 17 + 30) : (H - 58);
     this._weapon(ctx, g, p, 14, wY);
     this._temperature(ctx, g, p, W, H);
+    this._awaken(ctx, g, p, W, H, touch);
+    this._combo(ctx, g, W, H);
     this._prompt(ctx, g, W, H);
     this._toasts(ctx, g, W, H);
     this._bloodMoon(ctx, g, W, H);
+    if (g.boss) this._boss(ctx, g, W);
 
     ctx.restore();
+  }
+
+  // Vertical "power" gauge on the left edge — fills as you fight; press R to Awaken.
+  _awaken(ctx, g, p, W, H, touch) {
+    const bh = 150, bx = 16, by = H / 2 - bh / 2;
+    const full = p.awaken <= 0 && p.awakenMeter >= 1;
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    roundRect(ctx, bx, by, 12, bh, 6); ctx.fill();
+    const frac = p.awaken > 0 ? clamp(p.awaken / 12, 0, 1) : clamp(p.awakenMeter, 0, 1);
+    const fh = bh * frac;
+    const grad = ctx.createLinearGradient(0, by + bh, 0, by);
+    if (p.awaken > 0) { grad.addColorStop(0, '#ffd23a'); grad.addColorStop(1, '#fff2b0'); }
+    else { grad.addColorStop(0, '#c88a2a'); grad.addColorStop(1, '#ffd23a'); }
+    ctx.fillStyle = grad;
+    roundRect(ctx, bx, by + bh - fh, 12, fh, 6); ctx.fill();
+    if (full || p.awaken > 0) {
+      const pulse = 0.5 + Math.sin(g._time * 8) * 0.5;
+      ctx.strokeStyle = `rgba(255,230,120,${0.4 + pulse * 0.5})`; ctx.lineWidth = 2;
+      roundRect(ctx, bx - 1, by - 1, 14, bh + 2, 7); ctx.stroke();
+    }
+    ctx.save();
+    ctx.translate(bx + 6, by - 8); ctx.textAlign = 'center';
+    ctx.fillStyle = p.awaken > 0 ? '#fff2b0' : (full ? '#ffe27a' : '#9a8a6a');
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText(p.awaken > 0 ? 'SSJ' : 'KI', 0, 0);
+    ctx.restore();
+    if (full && !touch) {
+      ctx.textAlign = 'left'; ctx.font = 'bold 11px monospace';
+      ctx.fillStyle = `rgba(255,230,120,${0.6 + Math.sin(g._time * 8) * 0.4})`;
+      ctx.fillText('[R] AWAKEN', bx + 18, by + bh / 2 + 4);
+    }
+  }
+
+  _combo(ctx, g, W, H) {
+    if (g.combo < 2) return;
+    const a = clamp(g.comboTimer / 2, 0, 1);
+    ctx.globalAlpha = 0.5 + a * 0.5;
+    ctx.textAlign = 'center';
+    const s = 20 + Math.min(g.combo, 30) * 0.6;
+    ctx.font = `bold ${s}px monospace`;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(g.combo + ' HIT', W / 2 + 2, 96 + 2);
+    ctx.fillStyle = g.combo >= 10 ? '#ff7a3a' : '#ffe27a';
+    ctx.fillText(g.combo + ' HIT', W / 2, 96);
+    ctx.globalAlpha = 1;
+  }
+
+  _boss(ctx, g, W) {
+    // (per-boss health bar is drawn in world space by the boss itself)
   }
 
   _panel(ctx, x, y, w, h, r) {
@@ -3368,6 +4222,14 @@ class Minimap {
       ctx.fillStyle = sh.activated ? '#3fd8ff' : '#e08a3a';
       ctx.fillRect(s.sx - 2, s.sy - 2, 4, 4);
     }
+    // stone talus lairs (undefeated only)
+    for (const tl of (world.structures.talus || [])) {
+      if (tl.defeated) continue;
+      if (requireReveal && !this.isRevealedWorld(tl.x, tl.y)) continue;
+      const s = toScreen(tl.x, tl.y);
+      ctx.fillStyle = '#e0642a';
+      ctx.beginPath(); ctx.moveTo(s.sx, s.sy - 4); ctx.lineTo(s.sx + 4, s.sy + 3); ctx.lineTo(s.sx - 4, s.sy + 3); ctx.closePath(); ctx.fill();
+    }
   }
 
   _legend(ctx, x, y) {
@@ -3474,9 +4336,11 @@ class Menus {
       ['Climb cliffs (uses stamina)', 'Walk into a cliff'],
       ['Swim (uses stamina)', 'Walk into deep water'],
       ['Attack / Slash', 'J  or  Left-Click'],
+      ['Dodge roll (just-dodge = Flurry!)', 'Space'],
+      ['⚡ AWAKEN (when KI gauge full)', 'R'],
       ['Shoot bow', 'K  or  Right-Click (aim with mouse)'],
       ['Throw bomb (rune)', 'B'],
-      ['Interact / Open / Activate', 'E  or  Space'],
+      ['Interact / Open / Activate', 'E'],
       ['Cycle weapon', 'Q'],
       ['Eat food (heal)', 'F'],
       ['Map', 'M'],
@@ -3608,7 +4472,14 @@ class Game {
     this.shakeAmt = 0;
     this.hitstop = 0;
     this.saveTimer = 8;
-    this.snowFlakes = [];
+    this._time = 0;
+    this.timeScale = 1;
+    this.slowmoT = 0; this.slowmoScale = 1;
+    this.lighting = new Lighting();
+    this.ambient = new Ambient();
+    this.lights = [];
+    this.floaters = [];
+    this.combo = 0; this.comboTimer = 0; this.comboBest = 0;
 
     this.resize();
     // Resume the saved world if there is one, otherwise roll a fresh seed.
@@ -3633,10 +4504,14 @@ class Game {
     this.minimap = new Minimap(this.world);
     this.player = new Player(this.world.spawn.x, this.world.spawn.y);
     this.dayNight = new DayNight(8);
+    this.weather = new Weather(new RNG((seed ^ 0xBEEF) >>> 0));
     this.spawner = new Spawner();
     this.hud = new HUD(this);
     this.menus = new Menus(this);
     this.enemies.length = 0; this.pickups.length = 0; this.projectiles.length = 0;
+    this.lights.length = 0; this.floaters.length = 0;
+    this.combo = 0; this.comboTimer = 0;
+    this.boss = null;
     this.toasts.length = 0;
     this.dayNight.onBloodMoon = () => this._bloodMoon();
     // reveal spawn area
@@ -3678,8 +4553,35 @@ class Game {
     if (this.toasts.length > 4) this.toasts.pop();
   }
 
-  shake(a) { this.shakeAmt = Math.min(10, this.shakeAmt + a); }
+  shake(a) { this.shakeAmt = Math.min(14, this.shakeAmt + a); }
   hitStop(t) { this.hitstop = Math.max(this.hitstop, t); }
+  startSlowmo(dur, scale) { this.slowmoT = Math.max(this.slowmoT, dur); this.slowmoScale = scale; }
+  addLight(x, y, r, col, life) { if (this.lights.length < 40) this.lights.push({ x, y, r, col, life, max: life }); }
+  addFloater(x, y, text, col, opts) {
+    opts = opts || {};
+    this.floaters.push({ x: x + rand(-3, 3), y, text: String(text), col: col || '#fff', life: opts.life || 0.9, max: opts.life || 0.9, vy: opts.vy || -30, size: opts.size || 12 });
+    if (this.floaters.length > 60) this.floaters.shift();
+  }
+  addCombo(n) {
+    this.combo += (n || 1);
+    this.comboTimer = 2.0;
+    if (this.combo > this.comboBest) this.comboBest = this.combo;
+    if (this.player) this.player.awakenGain(0.02 * (n || 1) + this.combo * 0.002);
+  }
+  rngPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  startBoss(ref) {
+    if (this.boss) return;
+    this.boss = new Boss(ref.x, ref.y, this, ref);
+    this.toast('A Stone Talus awakens! Strike its glowing ore.');
+    this.shake(7); this.audio.play('activate');
+  }
+  _checkBoss() {
+    if (this.boss || !this.world.structures.talus) return;
+    for (const t of this.world.structures.talus) {
+      if (!t.defeated && dist(this.player.x, this.player.y, t.x, t.y) < 190) { this.startBoss(t); break; }
+    }
+  }
 
   /* ---------------- spawning helpers ---------------- */
   spawnEnemy(x, y, kind) {
@@ -3851,6 +4753,7 @@ class Game {
 
   /* ---------------- update ---------------- */
   update(dt) {
+    this._time += dt;
     this.menus.update(dt);
     this._globalKeys();
     if (this.touch) this.touch.sync(this.state);
@@ -3920,24 +4823,39 @@ class Game {
     // hitstop freezes the world briefly for impact
     if (this.hitstop > 0) { this.hitstop -= dt; dt = Math.min(dt, 0.0005); }
 
-    this.dayNight.update(dt);
+    // slow-motion (flurry rush) scales the simulation but not real-time timers
+    if (this.slowmoT > 0) { this.slowmoT -= dt; this.timeScale = this.slowmoScale; }
+    else this.timeScale = 1;
+    const sdt = dt * this.timeScale;
+
+    this.dayNight.update(sdt);
+    this.weather.update(sdt, this);
+    this.ambient.update(sdt, this);
     this.audio.updateMusic(dt, this.dayNight.night);
 
     // mouse world pos
     this.mouseWorld.x = this.camera.x + inp.mouse.sx / this.zoom;
     this.mouseWorld.y = this.camera.y + inp.mouse.sy / this.zoom;
 
-    this.player.update(dt, this);
-    this.spawner.update(dt, this);
-    for (const e of this.enemies) e.update(dt, this);
-    for (const pk of this.pickups) pk.update(dt, this);
-    for (const pr of this.projectiles) pr.update(dt, this);
-    this.particles.update(dt);
+    this.player.update(sdt, this);
+    this.spawner.update(sdt, this);
+    this._checkBoss();
+    for (const e of this.enemies) e.update(sdt, this);
+    if (this.boss) this.boss.update(sdt, this);
+    for (const pk of this.pickups) pk.update(sdt, this);
+    for (const pr of this.projectiles) pr.update(sdt, this);
+    this.particles.update(sdt);
+
+    // transient lights + floating text
+    for (let i = this.lights.length - 1; i >= 0; i--) { this.lights[i].life -= sdt; if (this.lights[i].life <= 0) this.lights.splice(i, 1); }
+    for (let i = this.floaters.length - 1; i >= 0; i--) { const f = this.floaters[i]; f.life -= sdt; f.y += f.vy * sdt; f.vy += 40 * sdt; if (f.life <= 0) this.floaters.splice(i, 1); }
+    if (this.comboTimer > 0) { this.comboTimer -= dt; if (this.comboTimer <= 0) this.combo = 0; }
 
     // cull dead
     this.enemies = this.enemies.filter(e => e.state !== 'dead' || e.deadT > 0);
     this.pickups = this.pickups.filter(p => !p.dead);
     this.projectiles = this.projectiles.filter(p => !p.dead);
+    if (this.boss && this.boss.dead && this.boss.deadT <= 0) this.boss = null;
 
     // interaction
     this._updateInteraction();
@@ -3961,7 +4879,7 @@ class Game {
     if (p.state === 'glide' || p.state === 'climb' || p.state === 'swim') { this.currentInteract = null; return; }
     const o = this.world.nearestInteractable(p.x, p.y, INTERACT_RANGE);
     this.currentInteract = o ? { obj: o, label: this._interactLabel(o) } : null;
-    if (this.currentInteract && this.input.wasPressed('KeyE', 'Space')) {
+    if (this.currentInteract && this.input.wasPressed('KeyE')) {
       this._doInteract(o);
     }
   }
@@ -4023,6 +4941,7 @@ class Game {
     ctx.setTransform(this.zoom * this.dpr, 0, 0, this.zoom * this.dpr, -camX * this.zoom * this.dpr, -camY * this.zoom * this.dpr);
 
     this.world.drawTerrain(ctx, this.view);
+    this.ambient.drawWater(ctx, this);
 
     // build y-sorted render list
     const list = [];
@@ -4030,18 +4949,21 @@ class Game {
     const p = this.player;
     list.push({ sortY: p.y, kind: 'player' });
     for (const e of this.enemies) if (this._inView(e.x, e.y, 40)) list.push({ sortY: e.y, kind: 'enemy', e });
+    if (this.boss && this._inView(this.boss.x, this.boss.y, 120)) list.push({ sortY: this.boss.y, kind: 'boss' });
     for (const pk of this.pickups) if (this._inView(pk.x, pk.y, 30)) list.push({ sortY: pk.y, kind: 'pickup', pk });
     for (const pr of this.projectiles) if (this._inView(pr.x, pr.y, 30)) list.push({ sortY: pr.y + 4, kind: 'proj', pr });
     list.sort((a, b) => a.sortY - b.sortY);
     for (const it of list) {
-      if (it.kind === 'obj') this.world.drawObject(ctx, it.o);
+      if (it.kind === 'obj') this.world.drawObject(ctx, it.o, this._time);
       else if (it.kind === 'player') p.draw(ctx, this);
       else if (it.kind === 'enemy') it.e.draw(ctx, this);
+      else if (it.kind === 'boss') this.boss.draw(ctx, this);
       else if (it.kind === 'pickup') it.pk.draw(ctx, this);
       else if (it.kind === 'proj') it.pr.draw(ctx, this);
     }
 
     this.particles.draw(ctx);
+    this.ambient.drawDay(ctx, this);
 
     // interaction highlight ring
     if (this.currentInteract) {
@@ -4053,9 +4975,11 @@ class Game {
     ctx.restore();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
-    // day/night tint (multiply)
-    this._drawTint(ctx);
-    this._drawWeather(ctx);
+    // lighting, fireflies, weather, floating text (all screen space)
+    this.lighting.render(ctx, this);
+    this.ambient.drawGlow(ctx, this);
+    this.weather.render(ctx, this);
+    this._drawFloaters(ctx);
 
     // HUD + overlays
     if (this.state === 'playing' || this.state === 'pause' || this.state === 'death') {
@@ -4078,28 +5002,19 @@ class Game {
     return x > this.view.x - pad && x < this.view.x + this.view.w + pad && y > this.view.y - pad && y < this.view.y + this.view.h + pad;
   }
 
-  _drawTint(ctx) {
-    const t = this.dayNight.tint();
-    // multiply darken
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.fillStyle = rgb(t.r, t.g, t.b);
-    ctx.fillRect(0, 0, this.W, this.H);
-    ctx.globalCompositeOperation = 'source-over';
-    // subtle blue additive at deep night
-    const n = this.dayNight.night;
-    if (n > 0.3) { ctx.fillStyle = `rgba(20,30,70,${(n - 0.3) * 0.18})`; ctx.fillRect(0, 0, this.W, this.H); }
-  }
-
-  _drawWeather(ctx) {
-    const tile = this.world.tileInfoAtWorld(this.player.x, this.player.y);
-    if (!tile.cold) { this.snowFlakes.length = 0; return; }
-    if (this.snowFlakes.length === 0) for (let i = 0; i < 60; i++) this.snowFlakes.push({ x: Math.random() * this.W, y: Math.random() * this.H, s: rand(0.5, 1.6), v: rand(18, 40) });
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    for (const f of this.snowFlakes) {
-      f.y += f.v * 0.016; f.x += Math.sin((f.y + f.x) * 0.02) * 0.4;
-      if (f.y > this.H) { f.y = -4; f.x = Math.random() * this.W; }
-      ctx.fillRect(f.x, f.y, f.s, f.s);
+  _drawFloaters(ctx) {
+    if (!this.floaters.length) return;
+    const z = this.zoom, view = this.view;
+    ctx.textAlign = 'center';
+    for (const f of this.floaters) {
+      const sx = (f.x - view.x) * z, sy = (f.y - view.y) * z;
+      if (sx < -20 || sx > this.W + 20 || sy < -20 || sy > this.H + 20) continue;
+      ctx.globalAlpha = clamp(f.life / f.max, 0, 1);
+      ctx.font = `bold ${f.size}px monospace`;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillText(f.text, sx + 1, sy + 1);
+      ctx.fillStyle = f.col; ctx.fillText(f.text, sx, sy);
     }
+    ctx.globalAlpha = 1;
   }
 
   _vignette(ctx) {

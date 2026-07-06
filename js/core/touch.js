@@ -36,6 +36,7 @@ class TouchControls {
     const actions = document.createElement('div'); actions.className = 'actions'; root.appendChild(actions);
     this._btn(actions, 'atk', 'A', 'KeyJ');    // attack
     this._btn(actions, 'act', 'E', 'KeyE');    // interact / activate
+    this._btn(actions, 'dodge', '↻', 'Space'); // dodge roll
     this._btn(actions, 'bow', '➹', 'KeyK');    // bow
     this._btn(actions, 'bomb', '✸', 'KeyB');   // bomb
     this._btn(actions, 'swap', '⟳', 'KeyQ');   // cycle weapon
@@ -44,6 +45,10 @@ class TouchControls {
     const left = document.createElement('div'); left.className = 'lbtns'; root.appendChild(left);
     this._btn(left, 'run', 'RUN', 'ShiftLeft', { toggle: true }); // sprint (toggle)
     this._btn(left, 'eat', 'EAT', 'KeyF');
+
+    // --- awaken button by the power gauge (only lights up when ready) ---
+    this.awakenBtn = this._btn(root, 'awaken', '⚡', 'KeyR');
+    this.awakenBtn.classList.add('awakenbtn');
 
     // --- top-right system buttons ---
     const top = document.createElement('div'); top.className = 'topbtns'; root.appendChild(top);
@@ -128,6 +133,7 @@ class TouchControls {
   sync(state) {
     if (!this.enabled) return;
     this.root.classList.toggle('ingame', state === 'playing');
+    if (this.awakenBtn && this.game.player) this.awakenBtn.classList.toggle('ready', this.game.player.canAwaken() || this.game.player.awaken > 0);
     if (state !== 'playing') { this.input.touchMove.x = 0; this.input.touchMove.y = 0; if (this.knob) this.knob.style.transform = 'translate(0,0)'; }
   }
 }

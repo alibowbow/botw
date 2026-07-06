@@ -48,6 +48,16 @@ class Player {
     this.stepTimer = 0;
     this.swimSplashT = 0;
     this.toastCd = 0;
+
+    // combat depth
+    this.dodgeT = 0;       // active dodge-roll timer
+    this.dodgeCd = 0;
+    this.dodgeDir = { x: 1, y: 0 };
+    this.flurry = 0;       // flurry-rush bonus window (seconds)
+    // awakening (Super Saiyan)
+    this.awaken = 0;       // seconds of transformation left
+    this.awakenMeter = 0;  // 0..1 charge
+    this.auraT = 0;
   }
 
   get weapon() { return this.weapons[this.wi]; }
@@ -72,6 +82,43 @@ class Player {
     this.wi = (this.wi + dir + this.weapons.length) % this.weapons.length;
   }
 
+  awakenGain(amt) { if (this.awaken <= 0) this.awakenMeter = clamp(this.awakenMeter + amt, 0, 1); }
+  canAwaken() { return this.awaken <= 0 && this.awakenMeter >= 1; }
+
+  awakenActivate(game) {
+    if (!this.canAwaken()) {
+      if (this.toastCd <= 0) { game.toast(this.awaken > 0 ? 'Already awakened!' : 'Awaken meter not full.'); this.toastCd = 2; }
+      return;
+    }
+    this.awaken = 12; this.awakenMeter = 0;
+    this.invuln = Math.max(this.invuln, 0.8);
+    this.stamina = this.maxStamina; this.staminaLock = false;
+    game.audio.play('activate'); game.shake(9);
+    game.addLight(this.x, this.y, 240, [255, 210, 90], 0.9);
+    game.particles.burst(this.x, this.y - 4, '#ffe27a', 34);
+    game.startSlowmo(0.5, 0.4);
+    game.toast('⚡ AWAKENING! Power surges through you!');
+    for (const e of game.enemies) if (e.alive && dist(this.x, this.y, e.x, e.y) < 92) { const k = angleTo(this.x, this.y, e.x, e.y); e.damage(4, Math.cos(k), Math.sin(k), 320, game); }
+  }
+
+  _dodge(game) {
+    if (this.dodgeCd > 0 || this.dodgeT > 0 || this.state !== 'normal') return;
+    if (this.stamina < 0.12 && this.awaken <= 0) return;
+    this.dodgeT = 0.26; this.dodgeCd = 0.5;
+    const mv = game.input.moveVector();
+    let dx = mv.x, dy = mv.y;
+    if (dx === 0 && dy === 0) { const f = vecFromFacing(this.facing); dx = f.x; dy = f.y; }
+    const l = Math.hypot(dx, dy) || 1; this.dodgeDir = { x: dx / l, y: dy / l };
+    this.invuln = Math.max(this.invuln, 0.3);
+    if (this.awaken <= 0) this._drainStamina(0.12, game);
+    game.particles.dustRing(this.x, this.y + 4);
+    game.audio.play('swing');
+    let threat = false;
+    for (const e of game.enemies) if (e.alive && e.aggro && dist(this.x, this.y, e.x, e.y) < 36) { threat = true; break; }
+    if (game.boss && dist(this.x, this.y, game.boss.x, game.boss.y) < game.boss.rad + 30) threat = true;
+    if (threat) { this.flurry = 1.5; game.startSlowmo(1.4, 0.32); game.toast('Flurry Rush!'); game.addFloater(this.x, this.y - 16, 'DODGE!', '#8fd0ff', { size: 14 }); }
+  }
+
   update(dt, game) {
     if (this.state === 'dead') { this.deadTimer -= dt; return; }
     this.attackCd = Math.max(0, this.attackCd - dt);
@@ -79,8 +126,36 @@ class Player {
     this.invuln = Math.max(0, this.invuln - dt);
     this.coldResist = Math.max(0, this.coldResist - dt);
     this.toastCd = Math.max(0, this.toastCd - dt);
+    this.dodgeCd = Math.max(0, this.dodgeCd - dt);
+    this.flurry = Math.max(0, this.flurry - dt);
+
+    // awakening upkeep
+    if (this.awaken > 0) {
+      this.awaken -= dt;
+      this.stamina = this.maxStamina; this.staminaLock = false;
+      this.health = Math.min(this.maxHearts, this.health + dt * 0.35); // slow regen
+      this.auraT -= dt;
+      if (this.auraT <= 0) { this.auraT = 0.05; game.particles.aura(this.x + rand(-6, 6), this.y + rand(-4, 8)); }
+      if (this.awaken <= 0) { game.toast('Awakening faded.'); game.particles.burst(this.x, this.y - 4, '#ffe27a', 12); }
+    }
+
+    // activate awakening
+    if (game.input.wasPressed('KeyR')) this.awakenActivate(game);
 
     if (this.state === 'glide') { this._updateGlide(dt, game); return; }
+
+    // --- dodge roll (overrides normal movement while active) ---
+    if (game.input.wasPressed('Space') && this.state === 'normal') this._dodge(game);
+    if (this.dodgeT > 0) {
+      this.dodgeT -= dt;
+      const spd = (this.awaken > 0 ? 300 : 250);
+      const res = game.world.moveCircle(this.x, this.y, this.rad, this.dodgeDir.x * spd * dt, this.dodgeDir.y * spd * dt, { deepSolid: true });
+      this.x = res.x; this.y = res.y;
+      this.walkPhase += dt * 20;
+      if (Math.random() < 0.5) game.particles.dust(this.x, this.y + 4, 0.5);
+      this._postMoveCommon(dt, game, game.world.tileInfoAtWorld(this.x, this.y), false);
+      return;
+    }
 
     // --- knockback decay ---
     if (Math.abs(this.kbx) > 1 || Math.abs(this.kby) > 1) {
@@ -179,6 +254,7 @@ class Player {
         speed = 72;
       }
       speed *= tile.speed || 1;
+      if (this.awaken > 0) speed *= 1.4; // awakening boosts movement
       const res = game.world.moveCircle(this.x, this.y, this.rad, mv.x * speed * dt, mv.y * speed * dt, { deepSolid: false, cliffSolid: true });
       this.x = res.x; this.y = res.y;
       if (moving) {
@@ -249,14 +325,14 @@ class Player {
     this.walkPhase += dt * 3;
     if (Math.random() < 0.3) game.particles.dust(this.x + rand(-6, 6), this.y + 10, 0.4);
     // land on press or when timer ends over walkable ground
-    const wantLand = input.wasPressed('KeyE', 'Space');
+    const wantLand = input.wasPressed('KeyE');
     const groundOK = !game.world.tileInfoAtWorld(this.x, this.y).deep && !game.world.tileInfoAtWorld(this.x, this.y).solid;
     if ((this.glideT <= 0 && groundOK) || (wantLand && groundOK)) {
       this.state = 'normal';
       game.particles.dustRing(this.x, this.y + 4);
       // Consume the land press so the same edge can't also fire an interaction
       // (e.g. re-launching the glide) later this frame.
-      if (wantLand) input.consume('KeyE', 'Space');
+      if (wantLand) input.consume('KeyE');
     } else if (this.glideT <= -6) {
       // forced landing (nudge to nearest walkable)
       this.state = 'normal';
@@ -301,6 +377,7 @@ class Player {
     this.hitSet = new Set();
     this.swingArc = -w.arc / 2;
     this.swingWeapon = w; // lock stats for this swing even if the weapon breaks now
+    this._swingId = (this._swingId || 0) + 1;
     game.audio.play('swing');
     // durability
     if (w.type !== 'fists' && isFinite(w.dur)) {
@@ -320,6 +397,8 @@ class Player {
     const t = 1 - this.attackT / w.swing; // 0..1 through swing
     this.swingArc = lerp(-w.arc / 2, w.arc / 2, t);
     const ang = this.aim;
+    const dmgMul = (this.awaken > 0 ? 2 : 1) * (this.flurry > 0 ? 2 : 1);
+    const dmg = w.dmg * dmgMul;
     for (const e of game.enemies) {
       if (!e.alive || this.hitSet.has(e)) continue;
       const d = dist(this.x, this.y, e.x, e.y);
@@ -328,11 +407,19 @@ class Player {
       if (Math.abs(angDiff(ang, toE)) <= w.arc / 2 + 0.15) {
         this.hitSet.add(e);
         const kx = Math.cos(toE), ky = Math.sin(toE);
-        e.damage(w.dmg, kx, ky, w.knock, game);
+        e.damage(dmg, kx, ky, w.knock, game);
+        if (w.element && e.alive) e.applyStatus(w.element, game);
         game.audio.play('hit');
         game.particles.hit(e.x, e.y);
+        if (w.elemCol) game.particles.burst(e.x, e.y - 2, w.elemCol, 6);
         game.hitStop(0.05);
+        game.addCombo(1);
       }
+    }
+    // boss weak-point (armoured body just clangs)
+    if (game.boss && !this.hitSet.has(game.boss)) {
+      const hit = game.boss.meleeHit(this, { dmg, reach: w.reach, arc: w.arc, element: w.element }, game, this._swingId);
+      if (hit) { this.hitSet.add(game.boss); game.addCombo(1); }
     }
     // cut grass / hit boulders in arc
     game.world.forEachObjectIn(this.x - w.reach - 8, this.y - w.reach - 8, this.x + w.reach + 8, this.y + w.reach + 8, (o) => {
@@ -429,6 +516,25 @@ class Player {
     if (!swim && !glide) {
       ctx.fillStyle = 'rgba(0,0,0,0.22)';
       ctx.beginPath(); ctx.ellipse(x, y + 6, 6, 3, 0, 0, TAU); ctx.fill();
+    }
+
+    // awakening: golden flame aura around Link
+    if (this.awaken > 0) {
+      const tt = game._time;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 7; i++) {
+        const a = i / 7 * TAU + tt * 4;
+        const rr = 11 + Math.sin(tt * 12 + i) * 3;
+        ctx.fillStyle = `rgba(255,${200 + (i % 2) * 40},90,0.5)`;
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(a) * 6, y - 2 + Math.sin(a) * 6);
+        ctx.lineTo(x + Math.cos(a) * rr, y - 2 + Math.sin(a) * rr);
+        ctx.lineTo(x + Math.cos(a + 0.4) * 6, y - 2 + Math.sin(a + 0.4) * 6);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.restore();
     }
 
     // flashing on i-frames

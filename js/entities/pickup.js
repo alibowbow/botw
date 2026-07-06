@@ -64,14 +64,14 @@ class Pickup {
       case 'meat': p.addFood('meat'); game.audio.play('pickup'); break;
       case 'mushroom': p.addFood('mushroom'); game.audio.play('pickup'); break;
       case 'korok': p.koroks += 1; game.audio.play('korok'); game.toast('Ya-ha-ha! Korok seeds: ' + p.koroks); break;
-      case 'weapon': p.giveWeapon(this.key); game.audio.play('pickup'); game.toast('Got ' + (WEAPONS[this.key] ? WEAPONS[this.key].name : 'a weapon') + '!'); break;
+      case 'weapon': p.giveWeapon(this.key); game.audio.play('pickup'); game.toast('Got ' + makeWeapon(this.key).name + '!'); break;
       default: game.audio.play('pickup');
     }
     game.particles.spark(this.x, this.y);
   }
 
   draw(ctx, game) {
-    const iconName = this.type === 'weapon' ? (WEAPONS[this.key] ? WEAPONS[this.key].icon : 'sword') : PICKUP_ICON[this.type];
+    const iconName = this.type === 'weapon' ? makeWeapon(this.key).icon : PICKUP_ICON[this.type];
     const icon = game.sprites.icon[iconName];
     const bobY = Math.sin(this.bob) * 1.5;
     const yy = this.y - this.z - bobY;

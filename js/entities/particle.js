@@ -37,6 +37,9 @@ class Particles {
   heal(x, y) {
     for (let i = 0; i < 8; i++) this._add(x + rand(-6, 6), y + rand(-2, 8), rand(-6, 6), rand(-40, -18), rand(0.6, 1.1), 'rgba(120,240,150,0.9)', rand(1.5, 3), -20);
   }
+  aura(x, y) {
+    this._add(x, y + rand(-2, 8), rand(-10, 10), rand(-56, -26), rand(0.4, 0.85), 'rgba(255,224,120,0.9)', rand(1.5, 3.2), -34);
+  }
   explosion(x, y) {
     for (let i = 0; i < 26; i++) { const a = Math.random() * TAU, s = rand(40, 180); this._add(x, y, Math.cos(a) * s, Math.sin(a) * s, rand(0.3, 0.7), i % 3 === 0 ? 'rgba(255,210,120,0.95)' : 'rgba(255,130,50,0.95)', rand(3, 6), 20); }
     for (let i = 0; i < 12; i++) { const a = Math.random() * TAU, s = rand(10, 60); this._add(x, y, Math.cos(a) * s, Math.sin(a) * s - 20, rand(0.6, 1.2), 'rgba(80,80,80,0.6)', rand(4, 8), -30); }

@@ -129,6 +129,14 @@ class Minimap {
       ctx.fillStyle = sh.activated ? '#3fd8ff' : '#e08a3a';
       ctx.fillRect(s.sx - 2, s.sy - 2, 4, 4);
     }
+    // stone talus lairs (undefeated only)
+    for (const tl of (world.structures.talus || [])) {
+      if (tl.defeated) continue;
+      if (requireReveal && !this.isRevealedWorld(tl.x, tl.y)) continue;
+      const s = toScreen(tl.x, tl.y);
+      ctx.fillStyle = '#e0642a';
+      ctx.beginPath(); ctx.moveTo(s.sx, s.sy - 4); ctx.lineTo(s.sx + 4, s.sy + 3); ctx.lineTo(s.sx - 4, s.sy + 3); ctx.closePath(); ctx.fill();
+    }
   }
 
   _legend(ctx, x, y) {

@@ -238,9 +238,9 @@ class World {
     });
   }
 
-  drawObject(ctx, o) {
+  drawObject(ctx, o, t) {
     const sb = this.sprites;
-    let name = o.type, feetOK = true;
+    let name = o.type;
     if (o.type === 'chest') name = o.opened ? 'chestOpen' : 'chest';
     else if (o.type === 'shrine') name = (o.ref && o.ref.activated) ? 'shrineOn' : 'shrine';
     else if (o.type === 'korokRock') name = 'rock';
@@ -252,6 +252,22 @@ class World {
       ctx.beginPath();
       ctx.ellipse(o.x, o.y + 1, (o.r || 6) * 1.2, (o.r || 6) * 0.55, 0, 0, TAU);
       ctx.fill();
+    }
+    // gentle wind sway for foliage (skew the top of the sprite)
+    const sways = (o.type === 'grass' || o.type === 'flower' || o.type === 'bush' || o.type === 'tree' || o.type === 'pine');
+    if (sways && t !== undefined) {
+      const amt = (o.type === 'tree' || o.type === 'pine') ? 0.05 : 0.14;
+      const sw = Math.sin(t * 1.6 + o.x * 0.05 + o.y * 0.03) * amt;
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      ctx.transform(1, 0, sw, 1, 0, 0); // horizontal shear grows toward the top
+      ctx.drawImage(cv, Math.round(-cv.width / 2), Math.round(-cv._feetY));
+      ctx.restore();
+      if (o.type === 'korokRock' && !o.done) {
+        ctx.fillStyle = '#4f8a3f';
+        ctx.beginPath(); ctx.ellipse(o.x + 3, o.y - 8, 2, 4, 0.5, 0, TAU); ctx.fill();
+      }
+      return;
     }
     ctx.drawImage(cv, Math.round(o.x - cv.width / 2), Math.round(o.y - cv._feetY));
     // korok leaf hint on the rock

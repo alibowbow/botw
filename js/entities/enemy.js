@@ -32,12 +32,22 @@ class Enemy {
     this.camp = null; // reference to camp if part of one
     this.attackWind = 0;
     this.alertPing = 0;
+    this.status = null; this.statusT = 0; this.burnTick = 0; // fire/ice/shock
+    this.isWanderer = false;
   }
 
   get alive() { return this.state !== 'dead'; }
+  get disabled() { return this.statusT > 0 && (this.status === 'ice' || this.status === 'shock'); }
+
+  applyStatus(element, game) {
+    if (element === 'fire') { this.status = 'fire'; this.statusT = 3; this.burnTick = 0.4; }
+    else if (element === 'ice') { this.status = 'ice'; this.statusT = 1.6; game.particles.burst(this.x, this.y - 2, '#7ad0ff', 6); }
+    else if (element === 'shock') { this.status = 'shock'; this.statusT = 0.9; game.particles.burst(this.x, this.y - 2, '#ffe14a', 8); }
+  }
 
   damage(dmg, kx, ky, knock, game) {
     if (this.state === 'dead') return;
+    if (this.status === 'ice' && this.statusT > 0) dmg *= 1.5; // frozen foes take extra
     this.hp -= dmg;
     this.flash = 0.12;
     this.hurtT = 0.22;
@@ -45,6 +55,7 @@ class Enemy {
     const l = Math.hypot(kx, ky) || 1;
     this.kbx += (kx / l) * knock; this.kby += (ky / l) * knock;
     game.particles.hit(this.x, this.y - 4);
+    if (game.addFloater) game.addFloater(this.x, this.y - 8, Math.max(1, Math.round(dmg)), '#ffe27a', { size: 13 });
     if (this.hp <= 0) this._die(game);
   }
 
@@ -66,6 +77,16 @@ class Enemy {
     this.shootCd = Math.max(0, this.shootCd - dt);
     this.alertPing = Math.max(0, this.alertPing - dt);
 
+    // elemental status
+    if (this.statusT > 0) {
+      this.statusT -= dt;
+      if (this.status === 'fire') {
+        this.burnTick -= dt;
+        if (this.burnTick <= 0) { this.burnTick = 0.4; this.hp -= 1; game.particles.burst(this.x, this.y - 4, '#ff7a3a', 3); if (game.addFloater) game.addFloater(this.x, this.y - 6, '1', '#ff9a4a', { size: 10 }); if (this.hp <= 0) { this._die(game); return; } }
+      }
+      if (this.statusT <= 0) this.status = null;
+    }
+
     // knockback
     if (Math.abs(this.kbx) > 2 || Math.abs(this.kby) > 2) {
       const opts = { deepSolid: !this.def.fly };
@@ -74,6 +95,7 @@ class Enemy {
       this.kbx *= Math.pow(0.0005, dt); this.kby *= Math.pow(0.0005, dt);
     }
     if (this.hurtT > 0) return; // stunned
+    if (this.disabled) return;  // frozen / shocked: cannot act
 
     const d = dist(this.x, this.y, p.x, p.y);
     const canSee = p.alive && d < this.def.sight && p.state !== 'glide';

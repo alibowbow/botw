@@ -20,11 +20,62 @@ class HUD {
     const wY = touch ? (16 + Math.ceil(p.maxHearts / 10) * 17 + 30) : (H - 58);
     this._weapon(ctx, g, p, 14, wY);
     this._temperature(ctx, g, p, W, H);
+    this._awaken(ctx, g, p, W, H, touch);
+    this._combo(ctx, g, W, H);
     this._prompt(ctx, g, W, H);
     this._toasts(ctx, g, W, H);
     this._bloodMoon(ctx, g, W, H);
+    if (g.boss) this._boss(ctx, g, W);
 
     ctx.restore();
+  }
+
+  // Vertical "power" gauge on the left edge — fills as you fight; press R to Awaken.
+  _awaken(ctx, g, p, W, H, touch) {
+    const bh = 150, bx = 16, by = H / 2 - bh / 2;
+    const full = p.awaken <= 0 && p.awakenMeter >= 1;
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    roundRect(ctx, bx, by, 12, bh, 6); ctx.fill();
+    const frac = p.awaken > 0 ? clamp(p.awaken / 12, 0, 1) : clamp(p.awakenMeter, 0, 1);
+    const fh = bh * frac;
+    const grad = ctx.createLinearGradient(0, by + bh, 0, by);
+    if (p.awaken > 0) { grad.addColorStop(0, '#ffd23a'); grad.addColorStop(1, '#fff2b0'); }
+    else { grad.addColorStop(0, '#c88a2a'); grad.addColorStop(1, '#ffd23a'); }
+    ctx.fillStyle = grad;
+    roundRect(ctx, bx, by + bh - fh, 12, fh, 6); ctx.fill();
+    if (full || p.awaken > 0) {
+      const pulse = 0.5 + Math.sin(g._time * 8) * 0.5;
+      ctx.strokeStyle = `rgba(255,230,120,${0.4 + pulse * 0.5})`; ctx.lineWidth = 2;
+      roundRect(ctx, bx - 1, by - 1, 14, bh + 2, 7); ctx.stroke();
+    }
+    ctx.save();
+    ctx.translate(bx + 6, by - 8); ctx.textAlign = 'center';
+    ctx.fillStyle = p.awaken > 0 ? '#fff2b0' : (full ? '#ffe27a' : '#9a8a6a');
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText(p.awaken > 0 ? 'SSJ' : 'KI', 0, 0);
+    ctx.restore();
+    if (full && !touch) {
+      ctx.textAlign = 'left'; ctx.font = 'bold 11px monospace';
+      ctx.fillStyle = `rgba(255,230,120,${0.6 + Math.sin(g._time * 8) * 0.4})`;
+      ctx.fillText('[R] AWAKEN', bx + 18, by + bh / 2 + 4);
+    }
+  }
+
+  _combo(ctx, g, W, H) {
+    if (g.combo < 2) return;
+    const a = clamp(g.comboTimer / 2, 0, 1);
+    ctx.globalAlpha = 0.5 + a * 0.5;
+    ctx.textAlign = 'center';
+    const s = 20 + Math.min(g.combo, 30) * 0.6;
+    ctx.font = `bold ${s}px monospace`;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(g.combo + ' HIT', W / 2 + 2, 96 + 2);
+    ctx.fillStyle = g.combo >= 10 ? '#ff7a3a' : '#ffe27a';
+    ctx.fillText(g.combo + ' HIT', W / 2, 96);
+    ctx.globalAlpha = 1;
+  }
+
+  _boss(ctx, g, W) {
+    // (per-boss health bar is drawn in world space by the boss itself)
   }
 
   _panel(ctx, x, y, w, h, r) {
