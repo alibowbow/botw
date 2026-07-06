@@ -171,6 +171,8 @@ class Game {
 
   onPlayerDied() {
     this.state = 'death';
+    this.slowmoT = 0; this.timeScale = 1; // don't leave the world in slow-mo
+    this.player.flurry = 0;
     this.shake(8);
   }
 
@@ -599,13 +601,14 @@ class Game {
           x: p.x, y: p.y, health: p.health, maxHearts: p.maxHearts, stamina: p.stamina, maxStamina: p.maxStamina,
           rupees: p.rupees, koroks: p.koroks, shrines: p.shrines, towersFound: p.towersFound,
           hasBow: p.hasBow, arrows: p.arrows, food: p.food, respawn: p.respawn,
-          weapons: p.weapons.map(w => w.key), wi: p.wi,
+          weapons: p.weapons.map(w => ({ key: w.key, dur: isFinite(w.dur) ? Math.ceil(w.dur) : -1 })), wi: p.wi,
         },
         dn: { time: this.dayNight.time, day: this.dayNight.day },
         towers: this.world.structures.towers.map(t => t.activated ? 1 : 0),
         shrines: this.world.structures.shrines.map(s => s.activated ? 1 : 0),
         chests: this.world.structures.chests.map(c => c.opened ? 1 : 0),
         koroks: this.world.structures.koroks.map(k => k.done ? 1 : 0),
+        talus: this.world.structures.talus.map(t => t.defeated ? 1 : 0),
         reveal: this._packReveal(),
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -637,7 +640,12 @@ class Game {
         rupees: s.rupees, koroks: s.koroks, shrines: s.shrines, towersFound: s.towersFound,
         hasBow: s.hasBow, arrows: s.arrows, food: s.food, respawn: s.respawn, wi: s.wi || 0,
       });
-      if (s.weapons && s.weapons.length) p.weapons = s.weapons.map(k => makeWeapon(k));
+      if (s.weapons && s.weapons.length) p.weapons = s.weapons.map(sw => {
+        const key = typeof sw === 'string' ? sw : sw.key;   // tolerate the old key-only format
+        const w = makeWeapon(key);
+        if (sw && typeof sw === 'object' && typeof sw.dur === 'number' && sw.dur >= 0 && isFinite(w.maxDur)) w.dur = clamp(sw.dur, 0, w.maxDur);
+        return w;
+      });
       if (p.weapons.length === 0) p.weapons = [makeWeapon('sword')];
       p.wi = clamp(p.wi, 0, p.weapons.length - 1);
       this.dayNight.time = d.dn.time; this.dayNight.day = d.dn.day;
@@ -645,6 +653,7 @@ class Game {
       d.shrines.forEach((v, i) => { if (this.world.structures.shrines[i]) this.world.structures.shrines[i].activated = !!v; });
       d.chests.forEach((v, i) => { if (this.world.structures.chests[i]) this.world.structures.chests[i].opened = !!v; });
       d.koroks.forEach((v, i) => { if (this.world.structures.koroks[i]) this.world.structures.koroks[i].done = !!v; });
+      if (d.talus) d.talus.forEach((v, i) => { if (this.world.structures.talus[i]) this.world.structures.talus[i].defeated = !!v; });
       if (d.reveal) this._unpackReveal(d.reveal);
       this._centerCamera();
       this.toast('Save loaded.');

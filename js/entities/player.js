@@ -53,7 +53,8 @@ class Player {
     this.dodgeT = 0;       // active dodge-roll timer
     this.dodgeCd = 0;
     this.dodgeDir = { x: 1, y: 0 };
-    this.flurry = 0;       // flurry-rush bonus window (seconds)
+    this.flurry = 0;       // flurry-rush 2x flag (active only while slow-mo runs)
+    this.flurryCd = 0;     // re-trigger cooldown
     // awakening (Super Saiyan)
     this.awaken = 0;       // seconds of transformation left
     this.awakenMeter = 0;  // 0..1 charge
@@ -116,7 +117,7 @@ class Player {
     let threat = false;
     for (const e of game.enemies) if (e.alive && e.aggro && dist(this.x, this.y, e.x, e.y) < 36) { threat = true; break; }
     if (game.boss && dist(this.x, this.y, game.boss.x, game.boss.y) < game.boss.rad + 30) threat = true;
-    if (threat) { this.flurry = 1.5; game.startSlowmo(1.4, 0.32); game.toast('Flurry Rush!'); game.addFloater(this.x, this.y - 16, 'DODGE!', '#8fd0ff', { size: 14 }); }
+    if (threat && this.flurryCd <= 0) { this.flurry = 1; this.flurryCd = 3; game.startSlowmo(1.4, 0.32); game.toast('Flurry Rush!'); game.addFloater(this.x, this.y - 16, 'DODGE!', '#8fd0ff', { size: 14 }); }
   }
 
   update(dt, game) {
@@ -127,7 +128,10 @@ class Player {
     this.coldResist = Math.max(0, this.coldResist - dt);
     this.toastCd = Math.max(0, this.toastCd - dt);
     this.dodgeCd = Math.max(0, this.dodgeCd - dt);
-    this.flurry = Math.max(0, this.flurry - dt);
+    this.flurryCd = Math.max(0, this.flurryCd - dt);
+    // flurry's 2x lives exactly as long as its slow-mo, so it can't leak into
+    // full-speed play or be chained into a permanent buff
+    if (game.slowmoT <= 0) this.flurry = 0;
 
     // awakening upkeep
     if (this.awaken > 0) {

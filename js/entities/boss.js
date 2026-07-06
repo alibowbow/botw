@@ -20,7 +20,8 @@ class Boss {
     this.slamT = 0;             // slam windup timer
     this.flash = 0;
     this.hurtT = 0;
-    this.hitBy = null;          // swing id already applied
+    this.hitBy = null;          // swing id that already struck the ore
+    this.clangedBy = null;      // swing id that already clanged the body
     this.rageShown = false;
   }
 
@@ -90,21 +91,21 @@ class Boss {
   // melee from the player. Returns true if the ore was struck.
   meleeHit(player, w, game, swingId) {
     if (this.state === 'dead') return false;
-    if (this.hitBy === swingId) return false;
     const ore = this.orePos();
     const ang = player.aim;
-    // must be facing the ore and within reach
     const dOre = dist(player.x, player.y, ore.x, ore.y);
     const toOre = angleTo(player.x, player.y, ore.x, ore.y);
     const dBody = dist(player.x, player.y, this.x, this.y);
-    if (dOre < w.reach + 10 && Math.abs(angDiff(ang, toOre)) < w.arc / 2 + 0.4) {
+    // the ore weak-point (damageable once per swing) — checked first so an
+    // earlier body-clang this swing never locks it out
+    if (this.hitBy !== swingId && dOre < w.reach + 10 && Math.abs(angDiff(ang, toOre)) < w.arc / 2 + 0.4) {
       this.hitBy = swingId;
       this._takeDamage(w.dmg * 2, ore.x, ore.y, game);
       return true;
     }
-    // hitting the armoured body just clangs
-    if (dBody < w.reach + this.rad && Math.abs(angDiff(ang, angleTo(player.x, player.y, this.x, this.y))) < w.arc / 2 + 0.3) {
-      this.hitBy = swingId;
+    // the armoured body just clangs (dedup'd separately from the ore)
+    if (this.clangedBy !== swingId && dBody < w.reach + this.rad && Math.abs(angDiff(ang, angleTo(player.x, player.y, this.x, this.y))) < w.arc / 2 + 0.3) {
+      this.clangedBy = swingId;
       game.particles.spark(player.x + Math.cos(ang) * this.rad, player.y + Math.sin(ang) * this.rad);
       game.audio.play('break');
       game.addFloater(this.x, this.y - 30, 'clang!', '#c8c8c8', { size: 11 });

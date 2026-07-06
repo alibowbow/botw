@@ -2108,7 +2108,8 @@ class Player {
     this.dodgeT = 0;       // active dodge-roll timer
     this.dodgeCd = 0;
     this.dodgeDir = { x: 1, y: 0 };
-    this.flurry = 0;       // flurry-rush bonus window (seconds)
+    this.flurry = 0;       // flurry-rush 2x flag (active only while slow-mo runs)
+    this.flurryCd = 0;     // re-trigger cooldown
     // awakening (Super Saiyan)
     this.awaken = 0;       // seconds of transformation left
     this.awakenMeter = 0;  // 0..1 charge
@@ -2171,7 +2172,7 @@ class Player {
     let threat = false;
     for (const e of game.enemies) if (e.alive && e.aggro && dist(this.x, this.y, e.x, e.y) < 36) { threat = true; break; }
     if (game.boss && dist(this.x, this.y, game.boss.x, game.boss.y) < game.boss.rad + 30) threat = true;
-    if (threat) { this.flurry = 1.5; game.startSlowmo(1.4, 0.32); game.toast('Flurry Rush!'); game.addFloater(this.x, this.y - 16, 'DODGE!', '#8fd0ff', { size: 14 }); }
+    if (threat && this.flurryCd <= 0) { this.flurry = 1; this.flurryCd = 3; game.startSlowmo(1.4, 0.32); game.toast('Flurry Rush!'); game.addFloater(this.x, this.y - 16, 'DODGE!', '#8fd0ff', { size: 14 }); }
   }
 
   update(dt, game) {
@@ -2182,7 +2183,10 @@ class Player {
     this.coldResist = Math.max(0, this.coldResist - dt);
     this.toastCd = Math.max(0, this.toastCd - dt);
     this.dodgeCd = Math.max(0, this.dodgeCd - dt);
-    this.flurry = Math.max(0, this.flurry - dt);
+    this.flurryCd = Math.max(0, this.flurryCd - dt);
+    // flurry's 2x lives exactly as long as its slow-mo, so it can't leak into
+    // full-speed play or be chained into a permanent buff
+    if (game.slowmoT <= 0) this.flurry = 0;
 
     // awakening upkeep
     if (this.awaken > 0) {
@@ -3096,7 +3100,8 @@ class Boss {
     this.slamT = 0;             // slam windup timer
     this.flash = 0;
     this.hurtT = 0;
-    this.hitBy = null;          // swing id already applied
+    this.hitBy = null;          // swing id that already struck the ore
+    this.clangedBy = null;      // swing id that already clanged the body
     this.rageShown = false;
   }
 
@@ -3166,21 +3171,21 @@ class Boss {
   // melee from the player. Returns true if the ore was struck.
   meleeHit(player, w, game, swingId) {
     if (this.state === 'dead') return false;
-    if (this.hitBy === swingId) return false;
     const ore = this.orePos();
     const ang = player.aim;
-    // must be facing the ore and within reach
     const dOre = dist(player.x, player.y, ore.x, ore.y);
     const toOre = angleTo(player.x, player.y, ore.x, ore.y);
     const dBody = dist(player.x, player.y, this.x, this.y);
-    if (dOre < w.reach + 10 && Math.abs(angDiff(ang, toOre)) < w.arc / 2 + 0.4) {
+    // the ore weak-point (damageable once per swing) — checked first so an
+    // earlier body-clang this swing never locks it out
+    if (this.hitBy !== swingId && dOre < w.reach + 10 && Math.abs(angDiff(ang, toOre)) < w.arc / 2 + 0.4) {
       this.hitBy = swingId;
       this._takeDamage(w.dmg * 2, ore.x, ore.y, game);
       return true;
     }
-    // hitting the armoured body just clangs
-    if (dBody < w.reach + this.rad && Math.abs(angDiff(ang, angleTo(player.x, player.y, this.x, this.y))) < w.arc / 2 + 0.3) {
-      this.hitBy = swingId;
+    // the armoured body just clangs (dedup'd separately from the ore)
+    if (this.clangedBy !== swingId && dBody < w.reach + this.rad && Math.abs(angDiff(ang, angleTo(player.x, player.y, this.x, this.y))) < w.arc / 2 + 0.3) {
+      this.clangedBy = swingId;
       game.particles.spark(player.x + Math.cos(ang) * this.rad, player.y + Math.sin(ang) * this.rad);
       game.audio.play('break');
       game.addFloater(this.x, this.y - 30, 'clang!', '#c8c8c8', { size: 11 });
@@ -3644,6 +3649,10 @@ class Weather {
     } else if (this.strike) {
       this.strike = null;
     }
+
+    // age the struck-bolt visual every frame, so it never freezes on-screen
+    // when the storm ends within its brief lifetime
+    if (this._boltAt) { this._boltAt.t -= dt; if (this._boltAt.t <= 0) this._boltAt = null; }
   }
 
   _lightning(dt, game) {
@@ -3651,7 +3660,8 @@ class Weather {
     if (this.strike) {
       this.strike.t -= dt;
       // cancel if the player stopped holding metal or became untargetable
-      if (!this._metal(p) || p.state === 'glide' || !p.alive) { this.strike = null; return; }
+      // (awakened Link is untargetable, matching the scheduling guard below)
+      if (!this._metal(p) || p.state === 'glide' || !p.alive || p.awaken > 0) { this.strike = null; return; }
       this.strike.x = p.x; this.strike.y = p.y;
       if (this.strike.t <= 0) {
         this.flash = 1;
@@ -3674,7 +3684,6 @@ class Weather {
         }
       }
     }
-    if (this._boltAt) { this._boltAt.t -= dt; if (this._boltAt.t <= 0) this._boltAt = null; }
   }
 
   _metal(p) {
@@ -4606,6 +4615,8 @@ class Game {
 
   onPlayerDied() {
     this.state = 'death';
+    this.slowmoT = 0; this.timeScale = 1; // don't leave the world in slow-mo
+    this.player.flurry = 0;
     this.shake(8);
   }
 
@@ -5034,13 +5045,14 @@ class Game {
           x: p.x, y: p.y, health: p.health, maxHearts: p.maxHearts, stamina: p.stamina, maxStamina: p.maxStamina,
           rupees: p.rupees, koroks: p.koroks, shrines: p.shrines, towersFound: p.towersFound,
           hasBow: p.hasBow, arrows: p.arrows, food: p.food, respawn: p.respawn,
-          weapons: p.weapons.map(w => w.key), wi: p.wi,
+          weapons: p.weapons.map(w => ({ key: w.key, dur: isFinite(w.dur) ? Math.ceil(w.dur) : -1 })), wi: p.wi,
         },
         dn: { time: this.dayNight.time, day: this.dayNight.day },
         towers: this.world.structures.towers.map(t => t.activated ? 1 : 0),
         shrines: this.world.structures.shrines.map(s => s.activated ? 1 : 0),
         chests: this.world.structures.chests.map(c => c.opened ? 1 : 0),
         koroks: this.world.structures.koroks.map(k => k.done ? 1 : 0),
+        talus: this.world.structures.talus.map(t => t.defeated ? 1 : 0),
         reveal: this._packReveal(),
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -5072,7 +5084,12 @@ class Game {
         rupees: s.rupees, koroks: s.koroks, shrines: s.shrines, towersFound: s.towersFound,
         hasBow: s.hasBow, arrows: s.arrows, food: s.food, respawn: s.respawn, wi: s.wi || 0,
       });
-      if (s.weapons && s.weapons.length) p.weapons = s.weapons.map(k => makeWeapon(k));
+      if (s.weapons && s.weapons.length) p.weapons = s.weapons.map(sw => {
+        const key = typeof sw === 'string' ? sw : sw.key;   // tolerate the old key-only format
+        const w = makeWeapon(key);
+        if (sw && typeof sw === 'object' && typeof sw.dur === 'number' && sw.dur >= 0 && isFinite(w.maxDur)) w.dur = clamp(sw.dur, 0, w.maxDur);
+        return w;
+      });
       if (p.weapons.length === 0) p.weapons = [makeWeapon('sword')];
       p.wi = clamp(p.wi, 0, p.weapons.length - 1);
       this.dayNight.time = d.dn.time; this.dayNight.day = d.dn.day;
@@ -5080,6 +5097,7 @@ class Game {
       d.shrines.forEach((v, i) => { if (this.world.structures.shrines[i]) this.world.structures.shrines[i].activated = !!v; });
       d.chests.forEach((v, i) => { if (this.world.structures.chests[i]) this.world.structures.chests[i].opened = !!v; });
       d.koroks.forEach((v, i) => { if (this.world.structures.koroks[i]) this.world.structures.koroks[i].done = !!v; });
+      if (d.talus) d.talus.forEach((v, i) => { if (this.world.structures.talus[i]) this.world.structures.talus[i].defeated = !!v; });
       if (d.reveal) this._unpackReveal(d.reveal);
       this._centerCamera();
       this.toast('Save loaded.');

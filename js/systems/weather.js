@@ -52,6 +52,10 @@ class Weather {
     } else if (this.strike) {
       this.strike = null;
     }
+
+    // age the struck-bolt visual every frame, so it never freezes on-screen
+    // when the storm ends within its brief lifetime
+    if (this._boltAt) { this._boltAt.t -= dt; if (this._boltAt.t <= 0) this._boltAt = null; }
   }
 
   _lightning(dt, game) {
@@ -59,7 +63,8 @@ class Weather {
     if (this.strike) {
       this.strike.t -= dt;
       // cancel if the player stopped holding metal or became untargetable
-      if (!this._metal(p) || p.state === 'glide' || !p.alive) { this.strike = null; return; }
+      // (awakened Link is untargetable, matching the scheduling guard below)
+      if (!this._metal(p) || p.state === 'glide' || !p.alive || p.awaken > 0) { this.strike = null; return; }
       this.strike.x = p.x; this.strike.y = p.y;
       if (this.strike.t <= 0) {
         this.flash = 1;
@@ -82,7 +87,6 @@ class Weather {
         }
       }
     }
-    if (this._boltAt) { this._boltAt.t -= dt; if (this._boltAt.t <= 0) this._boltAt = null; }
   }
 
   _metal(p) {
