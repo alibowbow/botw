@@ -177,9 +177,9 @@ class Enemy {
       ctx.globalAlpha = 1;
       return;
     }
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.beginPath(); ctx.ellipse(x, y + 5, this.rad * 0.9, this.rad * 0.4, 0, 0, TAU); ctx.fill();
+    // soft shadow
+    const shR = this.rad * 1.4;
+    ctx.drawImage(game.sprites.shadow, x - shR, y + 5 - shR * 0.45, shR * 2, shR * 0.9);
 
     const bobY = t.fly ? Math.sin(this.bob) * 3 : Math.abs(Math.sin(this.bob)) * 1.5;
     ctx.save(); ctx.translate(x, y - bobY);

@@ -516,10 +516,9 @@ class Player {
     const climb = this.state === 'climb';
     const glide = this.state === 'glide';
 
-    // shadow
+    // soft shadow
     if (!swim && !glide) {
-      ctx.fillStyle = 'rgba(0,0,0,0.22)';
-      ctx.beginPath(); ctx.ellipse(x, y + 6, 6, 3, 0, 0, TAU); ctx.fill();
+      ctx.drawImage(game.sprites.shadow, x - 9, y + 6 - 4, 18, 8);
     }
 
     // awakening: golden flame aura around Link
@@ -588,48 +587,69 @@ class Player {
       return;
     }
 
-    // legs
-    ctx.fillStyle = boot;
-    if (climb) {
-      ctx.fillRect(-4, 0, 3, 6 + Math.max(0, legPhase) * 2);
-      ctx.fillRect(1, 0, 3, 6 + Math.max(0, -legPhase) * 2);
-    } else {
-      ctx.fillRect(-3.5, 2 + bob, 3, 5 + legPhase * 1.5);
-      ctx.fillRect(0.5, 2 + bob, 3, 5 - legPhase * 1.5);
-    }
-
-    // body / tunic
-    ctx.fillStyle = tunic;
+    // legs: round-capped strokes read smoothly at HD zoom
+    ctx.strokeStyle = boot; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(-5, 3 + bob); ctx.lineTo(5, 3 + bob); ctx.lineTo(4, -4 + bob); ctx.lineTo(-4, -4 + bob); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = tunicD; ctx.fillRect(-1, -4 + bob, 2, 7); // center seam
-    ctx.fillStyle = '#caa24a'; ctx.fillRect(-5, 1 + bob, 10, 1.5); // belt
+    if (climb) {
+      ctx.moveTo(-2.4, 1); ctx.lineTo(-2.6, 5.6 + Math.max(0, legPhase) * 2);
+      ctx.moveTo(2.4, 1); ctx.lineTo(2.6, 5.6 + Math.max(0, -legPhase) * 2);
+    } else {
+      ctx.moveTo(-2.2, 2 + bob); ctx.lineTo(-2.4, 6.2 + bob + legPhase * 1.5);
+      ctx.moveTo(2.2, 2 + bob); ctx.lineTo(2.4, 6.2 + bob - legPhase * 1.5);
+    }
+    ctx.stroke();
+
+    // body / tunic: rounded silhouette with a soft vertical gradient + outline
+    const tg = ctx.createLinearGradient(0, -5 + bob, 0, 4 + bob);
+    tg.addColorStop(0, '#4fa35c'); tg.addColorStop(1, tunicD);
+    ctx.fillStyle = tg;
+    ctx.beginPath();
+    ctx.moveTo(-4.6, 3.4 + bob);
+    ctx.quadraticCurveTo(-5.4, -1 + bob, -3.8, -4 + bob);
+    ctx.quadraticCurveTo(0, -5.6 + bob, 3.8, -4 + bob);
+    ctx.quadraticCurveTo(5.4, -1 + bob, 4.6, 3.4 + bob);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,40,26,0.55)'; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.fillStyle = '#caa24a'; ctx.fillRect(-4.6, 1 + bob, 9.2, 1.4); // belt
+    ctx.fillStyle = '#8a6a30'; ctx.fillRect(-0.9, 0.9 + bob, 1.8, 1.6); // buckle
 
     // arms (attack pose reaches out)
-    ctx.fillStyle = skin;
+    ctx.strokeStyle = skin; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    ctx.beginPath();
     if (this.attackT > 0) {
-      ctx.fillRect(3, -3 + bob, 4, 2.5);
+      ctx.moveTo(2.5, -2.5 + bob); ctx.lineTo(6.6, -1.6 + bob);
     } else {
-      ctx.fillRect(-6, -2 + bob, 2.5, 4);
-      ctx.fillRect(3.5, -2 + bob, 2.5, 4);
+      const sw2 = Math.sin(this.walkPhase) * 1.2;
+      ctx.moveTo(-4.6, -2.5 + bob); ctx.lineTo(-5.2, 0.6 + bob + sw2);
+      ctx.moveTo(4.6, -2.5 + bob); ctx.lineTo(5.2, 0.6 + bob - sw2);
     }
+    ctx.stroke();
 
-    // head
+    // head with outline
     ctx.fillStyle = skin;
     ctx.beginPath(); ctx.arc(0, -8 + bob, 4.2, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(60,40,20,0.4)'; ctx.lineWidth = 0.7; ctx.stroke();
     // hair
     ctx.fillStyle = hair;
     if (up) { ctx.beginPath(); ctx.arc(0, -8 + bob, 4.4, 0, TAU); ctx.fill(); }
-    else { ctx.fillRect(-4.4, -11 + bob, 8.8, 3); ctx.fillRect(-4.6, -9 + bob, 2, 4); }
-    // cap
+    else {
+      ctx.beginPath(); ctx.arc(0, -8.6 + bob, 4.3, Math.PI * 1.02, Math.PI * 1.98); ctx.fill();
+      ctx.fillRect(-4.5, -9.4 + bob, 1.8, 3.6);
+    }
+    // cap: curved with a drooping tip
     ctx.fillStyle = cap;
     ctx.beginPath();
-    ctx.moveTo(-4.6, -9 + bob); ctx.lineTo(4.6, -9 + bob); ctx.lineTo(side ? 9 : 2, -17 + bob); ctx.closePath(); ctx.fill();
+    ctx.moveTo(-4.6, -9.4 + bob);
+    ctx.quadraticCurveTo(0, -13.6 + bob, 4.6, -9.4 + bob);
+    ctx.quadraticCurveTo(side ? 8 : 4, -13 + bob, side ? 10 : 5.5, -15.6 + bob);
+    ctx.quadraticCurveTo(side ? 5 : 1.5, -14.6 + bob, -1, -12.2 + bob);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(18,40,24,0.5)'; ctx.lineWidth = 0.7; ctx.stroke();
     // face
     if (!up) {
-      ctx.fillStyle = '#3a2a1a';
-      if (side) { ctx.fillRect(2, -8 + bob, 1.4, 1.6); }
-      else { ctx.fillRect(-2.4, -8 + bob, 1.4, 1.6); ctx.fillRect(1, -8 + bob, 1.4, 1.6); }
+      ctx.fillStyle = '#2e2214';
+      if (side) { ctx.fillRect(2, -8.4 + bob, 1.3, 1.7); }
+      else { ctx.fillRect(-2.4, -8.4 + bob, 1.3, 1.7); ctx.fillRect(1.1, -8.4 + bob, 1.3, 1.7); }
     }
 
     // weapon swing arc
@@ -644,7 +664,7 @@ class Player {
       ctx.beginPath(); ctx.arc(0, -2, w.reach * 0.7, -0.5, 0.5); ctx.stroke();
       // weapon icon along the arc
       const icon = game.sprites.icon[w.icon];
-      if (icon) { ctx.drawImage(icon, w.reach * 0.55 - 8, -2 - 8); }
+      if (icon) { ctx.drawImage(icon, w.reach * 0.55 - 8, -2 - 8, 16, 16); }
       ctx.restore();
     }
 

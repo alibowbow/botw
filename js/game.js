@@ -42,6 +42,7 @@ class Game {
     this.slowmoT = 0; this.slowmoScale = 1;
     this.lighting = new Lighting();
     this.ambient = new Ambient();
+    this.atmosphere = new Atmosphere(20260707);
     this.lights = [];
     this.floaters = [];
     this.combo = 0; this.comboTimer = 0; this.comboBest = 0;
@@ -102,8 +103,11 @@ class Game {
     this.canvas.height = Math.floor(h * dpr);
     this.dpr = dpr;
     this.W = w; this.H = h;
-    this.zoom = clamp(Math.round(h / (TILE * TARGET_TILES_TALL)), 2, 4);
-    this.ctx.imageSmoothingEnabled = false;
+    // fractional zoom: the HD art pipeline is smoothed, so we no longer need
+    // integer pixel scaling
+    this.zoom = clamp(h / (TILE * TARGET_TILES_TALL), 2, 4);
+    this.ctx.imageSmoothingEnabled = true;
+    // default (bilinear) smoothing quality — 'high' is too costly per frame
   }
 
   startGame() {
@@ -490,9 +494,10 @@ class Game {
   render() {
     const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
 
-    if (this.state === 'title') { this.menus.drawTitle(ctx, this.W, this.H, this.titleOptions, this.menuIndex); return; }
+
+    if (this.state === 'title') { this.menus.drawTitle(ctx, this.W, this.H, this.titleOptions, this.menuIndex); this.atmosphere.drawPost(ctx, this); return; }
     if (this.state === 'howto' && this.prevState === 'title') { this.menus.drawTitle(ctx, this.W, this.H, this.titleOptions, this.menuIndex); this.menus.drawHowTo(ctx, this.W, this.H); return; }
 
     // world
@@ -507,7 +512,7 @@ class Game {
     ctx.save();
     ctx.setTransform(this.zoom * this.dpr, 0, 0, this.zoom * this.dpr, -camX * this.zoom * this.dpr, -camY * this.zoom * this.dpr);
 
-    this.world.drawTerrain(ctx, this.view);
+    this.world.drawTerrain(ctx, this.view, this._time);
     this.ambient.drawWater(ctx, this);
 
     // build y-sorted render list
@@ -531,6 +536,7 @@ class Game {
 
     this.particles.draw(ctx);
     this.ambient.drawDay(ctx, this);
+    this.atmosphere.drawClouds(ctx, this); // cloud shadows sweep over everything
 
     // interaction highlight ring
     if (this.currentInteract) {
@@ -542,10 +548,11 @@ class Game {
     ctx.restore();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
-    // lighting, fireflies, weather, floating text (all screen space)
+    // lighting, fireflies, weather, cinematic post, floating text (screen space)
     this.lighting.render(ctx, this);
     this.ambient.drawGlow(ctx, this);
     this.weather.render(ctx, this);
+    this.atmosphere.drawPost(ctx, this);
     this._drawFloaters(ctx);
 
     // HUD + overlays
@@ -585,10 +592,14 @@ class Game {
   }
 
   _vignette(ctx) {
-    const g = ctx.createRadialGradient(this.W / 2, this.H / 2, this.H * 0.35, this.W / 2, this.H / 2, this.H * 0.75);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, 'rgba(0,0,0,0.35)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, this.W, this.H);
+    if (!this._vigGrad || this._vigW !== this.W || this._vigH !== this.H) {
+      this._vigW = this.W; this._vigH = this.H;
+      const g = ctx.createRadialGradient(this.W / 2, this.H / 2, this.H * 0.35, this.W / 2, this.H / 2, this.H * 0.75);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(0,0,0,0.35)');
+      this._vigGrad = g;
+    }
+    ctx.fillStyle = this._vigGrad; ctx.fillRect(0, 0, this.W, this.H);
   }
 
   /* ---------------- save / load ---------------- */

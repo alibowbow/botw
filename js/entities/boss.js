@@ -154,9 +154,9 @@ class Boss {
     if (this.state === 'dead') {
       ctx.globalAlpha = clamp(this.deadT / 1.4, 0, 1);
     }
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.beginPath(); ctx.ellipse(x, y + 14, this.rad * 1.1, this.rad * 0.45, 0, 0, TAU); ctx.fill();
+    // soft shadow
+    const shR = this.rad * 1.5;
+    ctx.drawImage(game.sprites.shadow, x - shR, y + 14 - shR * 0.42, shR * 2, shR * 0.84);
 
     const lift = this.state === 'slam' ? -Math.sin((0.8 - this.slamT) / 0.8 * Math.PI) * 8 : 0;
     const by = y + lift + Math.sin(this.bodyBob) * 1.2;

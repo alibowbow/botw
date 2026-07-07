@@ -844,14 +844,20 @@ class AudioFX {
    offscreen canvases once at startup. Objects are drawn many times per
    frame, so caching them as bitmaps is far cheaper than re-painting. */
 
-function makeCanvas(w, h) {
+// ss = supersample factor: the canvas is ss× larger but drawing code works in
+// logical units (ctx is pre-scaled). _lw/_lh keep the logical size for drawing.
+function makeCanvas(w, h, ss) {
+  ss = ss || 1;
   const c = document.createElement('canvas');
-  c.width = Math.max(1, Math.ceil(w));
-  c.height = Math.max(1, Math.ceil(h));
+  c.width = Math.max(1, Math.ceil(w * ss));
+  c.height = Math.max(1, Math.ceil(h * ss));
+  c._lw = w; c._lh = h;
   const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
+  if (ss !== 1) ctx.scale(ss, ss);
   return { c, ctx };
 }
+
+const SPRITE_SS = 3; // supersample for world sprites (smooth at zoom 2-4)
 
 class SpriteBank {
   constructor() {
@@ -876,6 +882,7 @@ class SpriteBank {
   }
 
   _build() {
+    this._shadow();
     this._trees();
     this._pines();
     this._bushes();
@@ -892,10 +899,22 @@ class SpriteBank {
     this._icons();
   }
 
+  // Soft radial blob shadow, drawn squashed under objects/actors.
+  _shadow() {
+    const { c, ctx } = makeCanvas(32, 32, SPRITE_SS);
+    const g = ctx.createRadialGradient(16, 16, 2, 16, 16, 15);
+    g.addColorStop(0, 'rgba(10,14,10,0.42)');
+    g.addColorStop(0.65, 'rgba(10,14,10,0.22)');
+    g.addColorStop(1, 'rgba(10,14,10,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 32, 32);
+    this.shadow = c;
+  }
+
   _trees() {
     for (let v = 0; v < 3; v++) {
       const w = 34, h = 44;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       // trunk
       ctx.fillStyle = '#6b4a2b';
       ctx.fillRect(w / 2 - 3, h - 14, 6, 14);
@@ -915,6 +934,7 @@ class SpriteBank {
         const a = this.R(0, TAU), rr = this.R(2, 12);
         ctx.beginPath(); ctx.arc(cx - 2 + Math.cos(a) * rr, cy - 3 + Math.sin(a) * rr * 0.8, this.R(1.2, 2.4), 0, TAU); ctx.fill();
       }
+      sunShade(ctx, w, h);
       this._put('tree', c, h - 3);
     }
   }
@@ -922,7 +942,7 @@ class SpriteBank {
   _pines() {
     for (let v = 0; v < 2; v++) {
       const w = 26, h = 46;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       ctx.fillStyle = '#5a3d22';
       ctx.fillRect(w / 2 - 2, h - 10, 4, 10);
       const dark = v ? '#20492e' : '#1f4a3a';
@@ -944,6 +964,7 @@ class SpriteBank {
         ctx.lineTo(cx + lw * 0.3, ly + 4);
         ctx.closePath(); ctx.fill();
       }
+      sunShade(ctx, w, h);
       this._put('pine', c, h - 2);
     }
   }
@@ -951,7 +972,7 @@ class SpriteBank {
   _bushes() {
     for (let v = 0; v < 3; v++) {
       const w = 24, h = 20;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       const base = ['#3f7d3a', '#4a7d3a', '#57893f'][v];
       const hi = ['#5aa552', '#67a24d', '#78b05a'][v];
       ctx.fillStyle = base;
@@ -961,6 +982,7 @@ class SpriteBank {
       for (let i = 0; i < 12; i++) ctx.fillRect(this.R(4, 20), this.R(4, 12), 2, 2);
       // occasional berries
       if (v === 2) { ctx.fillStyle = '#d8464f'; for (let i = 0; i < 4; i++) ctx.fillRect(this.R(6, 18), this.R(6, 13), 2, 2); }
+      sunShade(ctx, w, h);
       this._put('bush', c, h - 2);
     }
   }
@@ -968,7 +990,7 @@ class SpriteBank {
   _rocks() {
     for (let v = 0; v < 3; v++) {
       const w = 22, h = 18;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       ctx.fillStyle = '#8b857e';
       ctx.beginPath();
       ctx.moveTo(3, h - 2); ctx.lineTo(2, 9); ctx.lineTo(8, 3); ctx.lineTo(15, 4); ctx.lineTo(20, 10); ctx.lineTo(19, h - 2);
@@ -977,6 +999,7 @@ class SpriteBank {
       ctx.beginPath(); ctx.moveTo(6, 8); ctx.lineTo(11, 5); ctx.lineTo(15, 8); ctx.lineTo(12, 12); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#6f6a64';
       ctx.fillRect(4, h - 5, 14, 3);
+      sunShade(ctx, w, h);
       this._put('rock', c, h - 1);
     }
   }
@@ -984,7 +1007,7 @@ class SpriteBank {
   _boulders() {
     for (let v = 0; v < 2; v++) {
       const w = 40, h = 34;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       ctx.fillStyle = '#7d766e';
       ctx.beginPath();
       ctx.moveTo(4, h - 2); ctx.lineTo(2, 16); ctx.lineTo(12, 4); ctx.lineTo(26, 3); ctx.lineTo(37, 14); ctx.lineTo(36, h - 2);
@@ -996,6 +1019,7 @@ class SpriteBank {
       // crack (breakable hint)
       ctx.strokeStyle = '#4a453f'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(20, 6); ctx.lineTo(18, 16); ctx.lineTo(22, 24); ctx.stroke();
+      sunShade(ctx, w, h);
       this._put('boulder', c, h - 1);
     }
   }
@@ -1003,7 +1027,7 @@ class SpriteBank {
   _grassTufts() {
     for (let v = 0; v < 3; v++) {
       const w = 16, h = 14;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       const col = ['#6fae4a', '#7bbb52', '#84c25a'][v];
       ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineCap = 'round';
       for (let i = 0; i < 6; i++) {
@@ -1018,7 +1042,7 @@ class SpriteBank {
     const cols = ['#e46b9a', '#e8d24a', '#7aa6e8', '#f28d5a'];
     for (let v = 0; v < 3; v++) {
       const w = 16, h = 14;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       ctx.strokeStyle = '#4f8a3f'; ctx.lineWidth = 1.5;
       for (let i = 0; i < 3; i++) {
         const x = 4 + i * 4, col = cols[(v + i) % cols.length];
@@ -1033,7 +1057,7 @@ class SpriteBank {
 
   _stump() {
     const w = 18, h = 12;
-    const { c, ctx } = makeCanvas(w, h);
+    const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
     ctx.fillStyle = '#6b4a2b'; ctx.beginPath(); ctx.ellipse(w / 2, h - 4, 7, 4, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = '#8a6339'; ctx.beginPath(); ctx.ellipse(w / 2, h - 6, 6, 3.4, 0, 0, TAU); ctx.fill();
     ctx.strokeStyle = '#6b4a2b'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(w / 2, h - 6, 3, 1.7, 0, 0, TAU); ctx.stroke();
@@ -1043,7 +1067,7 @@ class SpriteBank {
   _chest() {
     for (let open = 0; open < 2; open++) {
       const w = 26, h = 22;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       // body
       ctx.fillStyle = '#7a4d24'; ctx.fillRect(3, 9, 20, 12);
       ctx.fillStyle = '#8f5d2c'; ctx.fillRect(4, 10, 18, 10);
@@ -1058,6 +1082,7 @@ class SpriteBank {
         ctx.fillStyle = '#241a10'; ctx.fillRect(5, 9, 16, 3); // dark interior
         ctx.fillStyle = '#ffe98a'; ctx.globalAlpha = 0.5; ctx.fillRect(6, 8, 14, 2); ctx.globalAlpha = 1;
       }
+      sunShade(ctx, w, h);
       this._put(open ? 'chestOpen' : 'chest', c, h - 1);
     }
   }
@@ -1065,7 +1090,7 @@ class SpriteBank {
   _campfire() {
     for (let f = 0; f < 3; f++) {
       const w = 24, h = 22;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       // logs
       ctx.fillStyle = '#5a3d22'; ctx.fillRect(5, h - 6, 14, 3);
       ctx.save(); ctx.translate(12, h - 5); ctx.rotate(0.5); ctx.fillRect(-7, -1.5, 14, 3); ctx.restore();
@@ -1086,7 +1111,7 @@ class SpriteBank {
 
   _tower() {
     const w = 44, h = 96;
-    const { c, ctx } = makeCanvas(w, h);
+    const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
     const cx = w / 2;
     // shadowed base
     ctx.fillStyle = '#2b3340'; ctx.fillRect(cx - 9, 12, 18, h - 12);
@@ -1108,7 +1133,7 @@ class SpriteBank {
   _shrine() {
     for (let active = 0; active < 2; active++) {
       const w = 40, h = 40;
-      const { c, ctx } = makeCanvas(w, h);
+      const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
       const cx = w / 2;
       // base pedestal
       ctx.fillStyle = '#2c3038'; ctx.fillRect(cx - 14, h - 12, 28, 12);
@@ -1127,13 +1152,14 @@ class SpriteBank {
       // accent lines
       ctx.strokeStyle = glow; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(cx - 10, 14); ctx.lineTo(cx - 10, h - 14); ctx.moveTo(cx + 10, 14); ctx.lineTo(cx + 10, h - 14); ctx.stroke();
+      sunShade(ctx, w, h);
       this._put(active ? 'shrineOn' : 'shrine', c, h - 1);
     }
   }
 
   _cookpot() {
     const w = 24, h = 18;
-    const { c, ctx } = makeCanvas(w, h);
+    const { c, ctx } = makeCanvas(w, h, SPRITE_SS);
     ctx.fillStyle = '#3a3a40'; ctx.beginPath(); ctx.ellipse(12, 11, 9, 6, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = '#55555c'; ctx.beginPath(); ctx.ellipse(12, 9, 8, 4, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = '#2a2a30'; ctx.beginPath(); ctx.ellipse(12, 9, 6, 3, 0, 0, TAU); ctx.fill();
@@ -1145,7 +1171,7 @@ class SpriteBank {
 
   _icons() {
     // Each icon centered on a 16x16 canvas.
-    const mk = (name, draw) => { const { c, ctx } = makeCanvas(16, 16); draw(ctx); this.icon[name] = c; };
+    const mk = (name, draw) => { const { c, ctx } = makeCanvas(16, 16, SPRITE_SS); draw(ctx); this.icon[name] = c; };
 
     mk('apple', (x) => { x.fillStyle = '#d8464f'; x.beginPath(); x.arc(8, 9, 5, 0, TAU); x.fill(); x.fillStyle = '#f07a7a'; x.beginPath(); x.arc(6, 7, 1.6, 0, TAU); x.fill(); x.strokeStyle = '#6b4a2b'; x.lineWidth = 1.4; x.beginPath(); x.moveTo(8, 4); x.lineTo(9, 2); x.stroke(); x.fillStyle = '#4f8a3f'; x.beginPath(); x.ellipse(10, 3, 2, 1, 0.6, 0, TAU); x.fill(); });
     mk('meat', (x) => { x.fillStyle = '#b5643c'; x.beginPath(); x.ellipse(8, 9, 5, 4, 0, 0, TAU); x.fill(); x.fillStyle = '#d98a5a'; x.beginPath(); x.ellipse(7, 8, 3, 2.4, 0, 0, TAU); x.fill(); x.fillStyle = '#f0efe8'; x.fillRect(11, 3, 2, 6); });
@@ -1166,6 +1192,20 @@ class SpriteBank {
     mk('bow', (x) => { x.strokeStyle = '#8a5a2a'; x.lineWidth = 2; x.beginPath(); x.arc(6, 8, 6, -1.1, 1.1); x.stroke(); x.strokeStyle = '#e8e8e8'; x.lineWidth = 1; x.beginPath(); x.moveTo(9, 3); x.lineTo(9, 13); x.stroke(); });
     mk('shield', (x) => { x.fillStyle = '#4f6ea0'; x.beginPath(); x.moveTo(8, 2); x.lineTo(13, 5); x.lineTo(13, 10); x.lineTo(8, 14); x.lineTo(3, 10); x.lineTo(3, 5); x.closePath(); x.fill(); x.fillStyle = '#c8a24a'; x.beginPath(); x.moveTo(8, 5); x.lineTo(10, 8); x.lineTo(8, 11); x.lineTo(6, 8); x.closePath(); x.fill(); });
   }
+}
+
+// Directional light pass: brightens the top-left, darkens the bottom-right of
+// whatever has been painted so far (source-atop keeps transparency intact).
+function sunShade(ctx, w, h) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  let g = ctx.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, 'rgba(255,246,214,0.30)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0)');
+  g.addColorStop(1, 'rgba(20,28,48,0.34)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
 }
 
 function heartPath(ctx, cx, cy, s) {
@@ -1703,44 +1743,108 @@ class World {
     return hit;
   }
 
-  /* ---------------- rendering ---------------- */
+  /* ---------------- rendering ----------------
+     Terrain is rendered like a tiny fragment shader: one pass per world pixel,
+     baked into per-chunk canvases (built once, cached). Per pixel we compute
+     - a domain-warped tile lookup   -> organic, non-square biome boundaries
+     - bilinear-interpolated elevation -> hillshading (NW sun) for 3D relief
+     - water depth colour + a shoreline foam band (foam points animate later)
+     - fine/medium detail noise      -> ground texture                      */
+  _terrainNoise() {
+    if (!this._nWarpA) {
+      this._nWarpA = new Noise(this.seed ^ 0x137f);
+      this._nWarpB = new Noise(this.seed ^ 0x7c21);
+      this._nDet = new Noise(this.seed ^ 0x3d9a);
+    }
+  }
+  _elevAt(wx, wy) {
+    const W = this.W, H = this.H, elev = this.elevOf;
+    const fx = wx / TILE - 0.5, fy = wy / TILE - 0.5;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const sx = fx - x0, sy = fy - y0;
+    const xa = clamp(x0, 0, W - 1), xb = clamp(x0 + 1, 0, W - 1);
+    const ya = clamp(y0, 0, H - 1), yb = clamp(y0 + 1, 0, H - 1);
+    const e00 = elev[ya * W + xa], e10 = elev[ya * W + xb];
+    const e01 = elev[yb * W + xa], e11 = elev[yb * W + xb];
+    const top = e00 + (e10 - e00) * sx;
+    const bot = e01 + (e11 - e01) * sx;
+    return top + (bot - top) * sy;
+  }
   _buildChunk(ccx, ccy) {
-    const size = CHUNK * TILE;
-    const { c, ctx } = makeCanvas(size, size);
-    const tx0 = ccx * CHUNK, ty0 = ccy * CHUNK;
-    for (let ly = 0; ly < CHUNK; ly++) {
-      for (let lx = 0; lx < CHUNK; lx++) {
-        const tx = tx0 + lx, ty = ty0 + ly;
-        if (!this.inBounds(tx, ty)) { ctx.fillStyle = '#22496a'; ctx.fillRect(lx * TILE, ly * TILE, TILE, TILE); continue; }
-        const t = TILES[this.tiles[ty * this.W + tx]];
-        const h = hash01(tx, ty, this.seed);
-        const b = (h - 0.5) * 2 * t.noise; // brightness variation
-        const base = shade(t.col, b);
-        ctx.fillStyle = css(base);
-        ctx.fillRect(lx * TILE, ly * TILE, TILE, TILE);
-        // speckles
-        const nSp = 3;
-        for (let s = 0; s < nSp; s++) {
-          const hx = hash01(tx * 4 + s, ty * 7 + 1, this.seed);
-          const hy = hash01(tx * 9 + 3, ty * 5 + s, this.seed + 99);
-          ctx.fillStyle = css(shade(t.col2, (hx - 0.5) * 0.2));
-          ctx.globalAlpha = 0.5;
-          ctx.fillRect(lx * TILE + hx * (TILE - 3), ly * TILE + hy * (TILE - 3), 2, 2);
-          ctx.globalAlpha = 1;
+    this._terrainNoise();
+    const size = CHUNK * TILE;                  // 256 world px
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const cctx = c.getContext('2d');
+    const img = cctx.createImageData(size, size);
+    const data = img.data;
+    const W = this.W, H = this.H, tiles = this.tiles;
+    const wx0 = ccx * size, wy0 = ccy * size;
+    const nA = this._nWarpA, nB = this._nWarpB, nD = this._nDet;
+    const HILL = 46;                            // hillshade strength
+    const foam = [];
+    let di = 0;
+    for (let py = 0; py < size; py++) {
+      const wy = wy0 + py + 0.5;
+      for (let px = 0; px < size; px++, di += 4) {
+        const wx = wx0 + px + 0.5;
+        // organic biome boundary: look the tile up at a noise-warped position
+        const warpX = nA.value(wx * 0.055, wy * 0.055) * 6;
+        const warpY = nB.value(wx * 0.055, wy * 0.055) * 6;
+        let tx = ((wx + warpX) / TILE) | 0, ty = ((wy + warpY) / TILE) | 0;
+        tx = tx < 0 ? 0 : (tx >= W ? W - 1 : tx);
+        ty = ty < 0 ? 0 : (ty >= H ? H - 1 : ty);
+        const ti = TILES[tiles[ty * W + tx]];
+        const e = this._elevAt(wx, wy);
+        const nF = nD.value(wx * 0.34, wy * 0.34);            // fine texture
+        const nM = nD.value(wx * 0.06 + 91.7, wy * 0.06);     // medium patches
+        let r, g, b;
+        if (ti.deep || ti.shallow) {
+          // depth gradient: dark abyss -> bright turquoise shallows
+          const depth = clamp(invlerp(0.10, 0.36, e), 0, 1);
+          const wave = nF * 0.5 + nM * 0.5;
+          r = 14 + depth * 62 + wave * 10;
+          g = 40 + depth * 106 + wave * 14;
+          b = 92 + depth * 116 + wave * 15;
+          // shoreline foam band
+          const foamT = invlerp(0.328, 0.356, e);
+          if (foamT > 0) {
+            const f = clamp(foamT, 0, 1) * (0.5 + 0.5 * clamp(nF + 0.4, 0, 1));
+            r += (238 - r) * f; g += (246 - g) * f; b += (250 - b) * f;
+            if (foamT > 0.55 && ((px + py * 3) % 9) === 0 && foam.length < 320) foam.push(wx0 + px, wy0 + py);
+          }
+        } else {
+          const base = ti.col, alt = ti.col2;
+          let mixT = 0.5 + nM * 0.42 + nF * 0.28;
+          if (ti.climb) mixT = 0.5 + nF * 0.9;                // rocky striations
+          mixT = mixT < 0 ? 0 : (mixT > 1 ? 1 : mixT);
+          if (ti.id === T.FLOWERS) mixT *= 0.3;               // pink stays a hint; sprites carry the colour
+          r = base.r + (alt.r - base.r) * mixT;
+          g = base.g + (alt.g - base.g) * mixT;
+          b = base.b + (alt.b - base.b) * mixT;
+          // hillshade: light from the north-west
+          const eR = this._elevAt(wx + 2.5, wy);
+          const eD = this._elevAt(wx, wy + 2.5);
+          let sh = 1 + ((e - eR) + (e - eD)) * HILL;
+          if (ti.climb) sh = sh * 1.12 - 0.14;                // cliffs pop harder
+          sh = sh < 0.55 ? 0.55 : (sh > 1.4 ? 1.4 : sh);
+          r *= sh; g *= sh; b *= sh;
+          // wet sand darkening right at the waterline
+          if (!ti.cold && e < 0.375 && e >= 0.35) {
+            const wet = invlerp(0.375, 0.35, e) * 0.22;
+            r *= 1 - wet; g *= 1 - wet; b *= 1 - wet * 0.6;
+          }
+          // snow sparkle
+          if (ti.cold && nF > 0.62) { r += 22; g += 22; b += 26; }
         }
-        // water: horizontal light bands; cliff: vertical shade
-        if (t.deep || t.shallow) {
-          ctx.fillStyle = css(shade(t.col2, 0.15), 0.35);
-          if (((tx * 3 + ty * 5) & 3) === 0) ctx.fillRect(lx * TILE + 2, ly * TILE + 5, TILE - 5, 1.5);
-        } else if (t.climb) {
-          ctx.fillStyle = css(shade(t.col, -0.35), 0.5);
-          ctx.fillRect(lx * TILE, ly * TILE, 2, TILE);
-          ctx.fillStyle = css(shade(t.col, 0.2), 0.4);
-          ctx.fillRect(lx * TILE + TILE - 3, ly * TILE + 2, 2, TILE - 4);
-        }
+        data[di] = r > 255 ? 255 : r;
+        data[di + 1] = g > 255 ? 255 : g;
+        data[di + 2] = b > 255 ? 255 : b;
+        data[di + 3] = 255;
       }
     }
-    return c;
+    cctx.putImageData(img, 0, 0);
+    return { canvas: c, foam };
   }
   _getChunk(ccx, ccy) {
     const key = ccx + ',' + ccy;
@@ -1748,16 +1852,38 @@ class World {
     if (!c) { c = this._buildChunk(ccx, ccy); this._chunks.set(key, c); }
     return c;
   }
-  drawTerrain(ctx, view) {
+  drawTerrain(ctx, view, time) {
     const size = CHUNK * TILE;
     const c0 = Math.floor(view.x / size), c1 = Math.floor((view.x + view.w) / size);
     const r0 = Math.floor(view.y / size), r1 = Math.floor((view.y + view.h) / size);
     const maxCX = Math.ceil(this.pxW / size) - 1, maxCY = Math.ceil(this.pxH / size) - 1;
+    const t = time || 0;
+    // prewarm: bake at most one just-off-screen chunk per frame, so walking
+    // across a chunk boundary never has to build several at once
+    outer: for (let cy = r0 - 1; cy <= r1 + 1; cy++) {
+      for (let cx = c0 - 1; cx <= c1 + 1; cx++) {
+        if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
+        if (cy >= r0 && cy <= r1 && cx >= c0 && cx <= c1) continue; // visible: built below anyway
+        if (!this._chunks.has(cx + ',' + cy)) { this._getChunk(cx, cy); break outer; }
+      }
+    }
     for (let cy = r0; cy <= r1; cy++) {
       for (let cx = c0; cx <= c1; cx++) {
         if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
         const chunk = this._getChunk(cx, cy);
-        ctx.drawImage(chunk, cx * size, cy * size);
+        ctx.drawImage(chunk.canvas, cx * size, cy * size);
+        // animated surf: foam points twinkle along the shoreline. Constant
+        // alpha + visibility pulsing keeps this a cheap batched pass.
+        const foam = chunk.foam;
+        if (foam.length) {
+          ctx.fillStyle = 'rgba(240,250,255,0.55)';
+          ctx.beginPath();
+          for (let i = 0; i < foam.length; i += 2) {
+            const fx = foam[i], fy = foam[i + 1];
+            if (Math.sin(t * 2.1 + fx * 0.09 + fy * 0.07) > -0.15) ctx.rect(fx, fy, 1.6, 1.2);
+          }
+          ctx.fill();
+        }
       }
     }
   }
@@ -1782,12 +1908,11 @@ class World {
     else if (o.type === 'korokRock') name = 'rock';
     const cv = sb.variant(name, o.v || 0) || sb.variant('rock', 0);
     if (!cv) return;
-    // shadow for solid/tall objects
+    const lw = cv._lw || cv.width, lh = cv._lh || cv.height;
+    // soft blob shadow for solid/tall objects
     if (o.solid || o.type === 'campfire' || o.type === 'korokRock') {
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx.beginPath();
-      ctx.ellipse(o.x, o.y + 1, (o.r || 6) * 1.2, (o.r || 6) * 0.55, 0, 0, TAU);
-      ctx.fill();
+      const sr = (o.r || 6) * 1.6;
+      ctx.drawImage(sb.shadow, o.x - sr, o.y + 1 - sr * 0.42, sr * 2, sr * 0.84);
     }
     // gentle wind sway for foliage (skew the top of the sprite)
     const sways = (o.type === 'grass' || o.type === 'flower' || o.type === 'bush' || o.type === 'tree' || o.type === 'pine');
@@ -1797,7 +1922,7 @@ class World {
       ctx.save();
       ctx.translate(o.x, o.y);
       ctx.transform(1, 0, sw, 1, 0, 0); // horizontal shear grows toward the top
-      ctx.drawImage(cv, Math.round(-cv.width / 2), Math.round(-cv._feetY));
+      ctx.drawImage(cv, -lw / 2, -cv._feetY, lw, lh);
       ctx.restore();
       if (o.type === 'korokRock' && !o.done) {
         ctx.fillStyle = '#4f8a3f';
@@ -1805,7 +1930,7 @@ class World {
       }
       return;
     }
-    ctx.drawImage(cv, Math.round(o.x - cv.width / 2), Math.round(o.y - cv._feetY));
+    ctx.drawImage(cv, o.x - lw / 2, o.y - cv._feetY, lw, lh);
     // korok leaf hint on the rock
     if (o.type === 'korokRock' && !o.done) {
       ctx.fillStyle = '#4f8a3f';
@@ -2563,10 +2688,9 @@ class Player {
     const climb = this.state === 'climb';
     const glide = this.state === 'glide';
 
-    // shadow
+    // soft shadow
     if (!swim && !glide) {
-      ctx.fillStyle = 'rgba(0,0,0,0.22)';
-      ctx.beginPath(); ctx.ellipse(x, y + 6, 6, 3, 0, 0, TAU); ctx.fill();
+      ctx.drawImage(game.sprites.shadow, x - 9, y + 6 - 4, 18, 8);
     }
 
     // awakening: golden flame aura around Link
@@ -2635,48 +2759,69 @@ class Player {
       return;
     }
 
-    // legs
-    ctx.fillStyle = boot;
-    if (climb) {
-      ctx.fillRect(-4, 0, 3, 6 + Math.max(0, legPhase) * 2);
-      ctx.fillRect(1, 0, 3, 6 + Math.max(0, -legPhase) * 2);
-    } else {
-      ctx.fillRect(-3.5, 2 + bob, 3, 5 + legPhase * 1.5);
-      ctx.fillRect(0.5, 2 + bob, 3, 5 - legPhase * 1.5);
-    }
-
-    // body / tunic
-    ctx.fillStyle = tunic;
+    // legs: round-capped strokes read smoothly at HD zoom
+    ctx.strokeStyle = boot; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(-5, 3 + bob); ctx.lineTo(5, 3 + bob); ctx.lineTo(4, -4 + bob); ctx.lineTo(-4, -4 + bob); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = tunicD; ctx.fillRect(-1, -4 + bob, 2, 7); // center seam
-    ctx.fillStyle = '#caa24a'; ctx.fillRect(-5, 1 + bob, 10, 1.5); // belt
+    if (climb) {
+      ctx.moveTo(-2.4, 1); ctx.lineTo(-2.6, 5.6 + Math.max(0, legPhase) * 2);
+      ctx.moveTo(2.4, 1); ctx.lineTo(2.6, 5.6 + Math.max(0, -legPhase) * 2);
+    } else {
+      ctx.moveTo(-2.2, 2 + bob); ctx.lineTo(-2.4, 6.2 + bob + legPhase * 1.5);
+      ctx.moveTo(2.2, 2 + bob); ctx.lineTo(2.4, 6.2 + bob - legPhase * 1.5);
+    }
+    ctx.stroke();
+
+    // body / tunic: rounded silhouette with a soft vertical gradient + outline
+    const tg = ctx.createLinearGradient(0, -5 + bob, 0, 4 + bob);
+    tg.addColorStop(0, '#4fa35c'); tg.addColorStop(1, tunicD);
+    ctx.fillStyle = tg;
+    ctx.beginPath();
+    ctx.moveTo(-4.6, 3.4 + bob);
+    ctx.quadraticCurveTo(-5.4, -1 + bob, -3.8, -4 + bob);
+    ctx.quadraticCurveTo(0, -5.6 + bob, 3.8, -4 + bob);
+    ctx.quadraticCurveTo(5.4, -1 + bob, 4.6, 3.4 + bob);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,40,26,0.55)'; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.fillStyle = '#caa24a'; ctx.fillRect(-4.6, 1 + bob, 9.2, 1.4); // belt
+    ctx.fillStyle = '#8a6a30'; ctx.fillRect(-0.9, 0.9 + bob, 1.8, 1.6); // buckle
 
     // arms (attack pose reaches out)
-    ctx.fillStyle = skin;
+    ctx.strokeStyle = skin; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    ctx.beginPath();
     if (this.attackT > 0) {
-      ctx.fillRect(3, -3 + bob, 4, 2.5);
+      ctx.moveTo(2.5, -2.5 + bob); ctx.lineTo(6.6, -1.6 + bob);
     } else {
-      ctx.fillRect(-6, -2 + bob, 2.5, 4);
-      ctx.fillRect(3.5, -2 + bob, 2.5, 4);
+      const sw2 = Math.sin(this.walkPhase) * 1.2;
+      ctx.moveTo(-4.6, -2.5 + bob); ctx.lineTo(-5.2, 0.6 + bob + sw2);
+      ctx.moveTo(4.6, -2.5 + bob); ctx.lineTo(5.2, 0.6 + bob - sw2);
     }
+    ctx.stroke();
 
-    // head
+    // head with outline
     ctx.fillStyle = skin;
     ctx.beginPath(); ctx.arc(0, -8 + bob, 4.2, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(60,40,20,0.4)'; ctx.lineWidth = 0.7; ctx.stroke();
     // hair
     ctx.fillStyle = hair;
     if (up) { ctx.beginPath(); ctx.arc(0, -8 + bob, 4.4, 0, TAU); ctx.fill(); }
-    else { ctx.fillRect(-4.4, -11 + bob, 8.8, 3); ctx.fillRect(-4.6, -9 + bob, 2, 4); }
-    // cap
+    else {
+      ctx.beginPath(); ctx.arc(0, -8.6 + bob, 4.3, Math.PI * 1.02, Math.PI * 1.98); ctx.fill();
+      ctx.fillRect(-4.5, -9.4 + bob, 1.8, 3.6);
+    }
+    // cap: curved with a drooping tip
     ctx.fillStyle = cap;
     ctx.beginPath();
-    ctx.moveTo(-4.6, -9 + bob); ctx.lineTo(4.6, -9 + bob); ctx.lineTo(side ? 9 : 2, -17 + bob); ctx.closePath(); ctx.fill();
+    ctx.moveTo(-4.6, -9.4 + bob);
+    ctx.quadraticCurveTo(0, -13.6 + bob, 4.6, -9.4 + bob);
+    ctx.quadraticCurveTo(side ? 8 : 4, -13 + bob, side ? 10 : 5.5, -15.6 + bob);
+    ctx.quadraticCurveTo(side ? 5 : 1.5, -14.6 + bob, -1, -12.2 + bob);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(18,40,24,0.5)'; ctx.lineWidth = 0.7; ctx.stroke();
     // face
     if (!up) {
-      ctx.fillStyle = '#3a2a1a';
-      if (side) { ctx.fillRect(2, -8 + bob, 1.4, 1.6); }
-      else { ctx.fillRect(-2.4, -8 + bob, 1.4, 1.6); ctx.fillRect(1, -8 + bob, 1.4, 1.6); }
+      ctx.fillStyle = '#2e2214';
+      if (side) { ctx.fillRect(2, -8.4 + bob, 1.3, 1.7); }
+      else { ctx.fillRect(-2.4, -8.4 + bob, 1.3, 1.7); ctx.fillRect(1.1, -8.4 + bob, 1.3, 1.7); }
     }
 
     // weapon swing arc
@@ -2691,7 +2836,7 @@ class Player {
       ctx.beginPath(); ctx.arc(0, -2, w.reach * 0.7, -0.5, 0.5); ctx.stroke();
       // weapon icon along the arc
       const icon = game.sprites.icon[w.icon];
-      if (icon) { ctx.drawImage(icon, w.reach * 0.55 - 8, -2 - 8); }
+      if (icon) { ctx.drawImage(icon, w.reach * 0.55 - 8, -2 - 8, 16, 16); }
       ctx.restore();
     }
 
@@ -2887,9 +3032,9 @@ class Enemy {
       ctx.globalAlpha = 1;
       return;
     }
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.beginPath(); ctx.ellipse(x, y + 5, this.rad * 0.9, this.rad * 0.4, 0, 0, TAU); ctx.fill();
+    // soft shadow
+    const shR = this.rad * 1.4;
+    ctx.drawImage(game.sprites.shadow, x - shR, y + 5 - shR * 0.45, shR * 2, shR * 0.9);
 
     const bobY = t.fly ? Math.sin(this.bob) * 3 : Math.abs(Math.sin(this.bob)) * 1.5;
     ctx.save(); ctx.translate(x, y - bobY);
@@ -3226,9 +3371,9 @@ class Boss {
     if (this.state === 'dead') {
       ctx.globalAlpha = clamp(this.deadT / 1.4, 0, 1);
     }
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.beginPath(); ctx.ellipse(x, y + 14, this.rad * 1.1, this.rad * 0.45, 0, 0, TAU); ctx.fill();
+    // soft shadow
+    const shR = this.rad * 1.5;
+    ctx.drawImage(game.sprites.shadow, x - shR, y + 14 - shR * 0.42, shR * 2, shR * 0.84);
 
     const lift = this.state === 'slam' ? -Math.sin((0.8 - this.slamT) / 0.8 * Math.PI) * 8 : 0;
     const by = y + lift + Math.sin(this.bodyBob) * 1.2;
@@ -3540,9 +3685,7 @@ class Lighting {
         this._hole(d, toX(g.x), toY(g.y), g.r * z, fl * a);
       }
       d.globalCompositeOperation = 'source-over';
-      ctx.imageSmoothingEnabled = true;
       ctx.drawImage(this.dark, 0, 0, W, H);
-      ctx.imageSmoothingEnabled = false;
     }
 
     // 3) emissive bloom (additive)
@@ -3802,10 +3945,10 @@ class Ambient {
       if (t.deep || t.solid) continue;
       const flap = Math.abs(Math.sin(c.ph * 4));
       ctx.fillStyle = cols[c.hue];
-      const w = 1.4 + flap * 2.2;
-      ctx.beginPath(); ctx.ellipse(c.x - w, c.y, w, 2.4, 0, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(c.x + w, c.y, w, 2.4, 0, 0, TAU); ctx.fill();
-      ctx.fillStyle = '#2a2320'; ctx.fillRect(c.x - 0.5, c.y - 1.5, 1, 3);
+      const w = 0.9 + flap * 1.4;
+      ctx.beginPath(); ctx.ellipse(c.x - w, c.y, w, 1.6, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(c.x + w, c.y, w, 1.6, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#2a2320'; ctx.fillRect(c.x - 0.4, c.y - 1.1, 0.8, 2.2);
     }
   }
 
@@ -3847,6 +3990,144 @@ class Ambient {
       }
     }
     ctx.stroke();
+  }
+}
+
+
+/* ===== js/systems/atmosphere.js ===== */
+'use strict';
+/* atmosphere.js — cinematic layers: drifting cloud shadows over the terrain,
+   god rays at dawn/dusk, a colour-grade pass and subtle film grain. All the
+   heavy textures are baked once; per-frame cost is a few blended draws. */
+
+class Atmosphere {
+  constructor(seed) {
+    this._buildClouds(seed || 7);
+    this._buildGrain();
+  }
+
+  _buildClouds(seed) {
+    const S = 256;
+    const n = new Noise(seed ^ 0xC10D);
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(S, S);
+    const d = img.data;
+    let i = 0;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++, i += 4) {
+        // tileable-ish: sample noise on a torus via two offset reads blended
+        const fx = x / S, fy = y / S;
+        const a = n.fbm01(x * 0.028, y * 0.028, 3, 2, 0.55);
+        const b2 = n.fbm01((x - S) * 0.028, (y - S) * 0.028, 3, 2, 0.55);
+        const v = lerp(a, b2, smoothstep(Math.max(fx, fy)));
+        const alpha = smoothstep(invlerp(0.52, 0.8, v));
+        d[i] = 30; d[i + 1] = 38; d[i + 2] = 58;
+        d[i + 3] = alpha * 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    this.clouds = c;
+  }
+
+  _buildGrain() {
+    // sparse light/dark speckles with alpha baked in, so one plain
+    // (source-over) draw is enough — no expensive blend modes per frame
+    const S = 256;
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(S, S);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const r = Math.random();
+      if (r < 0.5) { d[i + 3] = 0; continue; }
+      const bright = r > 0.75;
+      d[i] = d[i + 1] = d[i + 2] = bright ? 255 : 0;
+      d[i + 3] = 10 + Math.random() * 14;
+    }
+    ctx.putImageData(img, 0, 0);
+    this.grain = c;
+  }
+
+  // ---- world space (inside the camera transform): drifting cloud shadows ----
+  drawClouds(ctx, game) {
+    const w = game.weather;
+    const density = 0.10 + (w ? w.gloom : 0) * 0.55;   // clearer sky -> fainter
+    if (density <= 0.02) return;
+    const view = game.view, t = game._time;
+    const SCALE = 3.2;                                  // world px per cloud px
+    const S = this.clouds.width * SCALE;                // one tile of cloud
+    const ox = (t * 8.5) % S, oy = (t * 5.2) % S;
+    const x0 = Math.floor((view.x + ox) / S) * S - ox;
+    const y0 = Math.floor((view.y + oy) / S) * S - oy;
+    // plain alpha draws of a dark cloud texture read as shadows but avoid the
+    // costly 'multiply' blend (software renderers crawl on blend modes)
+    ctx.save();
+    ctx.globalAlpha = clamp(density * 0.75, 0, 0.45);
+    for (let y = y0; y < view.y + view.h; y += S) {
+      for (let x = x0; x < view.x + view.w; x += S) {
+        ctx.drawImage(this.clouds, x, y, S, S);
+      }
+    }
+    ctx.restore();
+  }
+
+  // ---- screen space, after lighting: rays, grade, grain ----
+  drawPost(ctx, game) {
+    const W = game.W, H = game.H;
+    const dn = game.dayNight;
+    // warm factor peaks mid-dawn / mid-dusk
+    const h = dn.time;
+    let warm = 0, morning = false;
+    if (h > 17 && h < 20) warm = 1 - Math.abs((h - 18.5) / 1.5);
+    if (h >= 5 && h < 8) { warm = 1 - Math.abs((h - 6.5) / 1.5); morning = true; }
+
+    // god rays: soft light shafts sweeping from the sun's side of the sky
+    if (warm > 0.08 && game.state !== 'map') {
+      const sx = morning ? W + 60 : -60;     // sun off the right at dawn, left at dusk
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 5; i++) {
+        const ang = (morning ? Math.PI : 0) + (i - 2) * 0.09 + Math.sin(game._time * 0.11 + i) * 0.02;
+        ctx.save();
+        ctx.translate(sx, -40);
+        ctx.rotate(ang + (morning ? 0.5 : -0.5));
+        const len = Math.hypot(W, H) * 1.4;
+        const g = ctx.createLinearGradient(0, 0, 0, len);
+        g.addColorStop(0, `rgba(255,214,150,${0.10 * warm})`);
+        g.addColorStop(0.6, `rgba(255,200,130,${0.035 * warm})`);
+        g.addColorStop(1, 'rgba(255,200,130,0)');
+        ctx.fillStyle = g;
+        const wdt = 60 + i * 34;
+        ctx.fillRect(-wdt / 2, 0, wdt, len);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    // colour grade: one gentle tinted fill (plain alpha — cheap everywhere)
+    const night = dn.night;
+    if (night < 0.5) {
+      ctx.fillStyle = `rgba(255,214,150,${0.06 * (1 - night * 2) + warm * 0.06})`;
+    } else {
+      ctx.fillStyle = `rgba(90,120,220,${0.07 * (night - 0.5) * 2})`;
+    }
+    ctx.fillRect(0, 0, W, H);
+
+    // film grain: one cached screen-sized layer, plain draw, shifting offset
+    if (!this._grainScreen || this._gw !== W || this._gh !== H) {
+      this._gw = W; this._gh = H;
+      const gs = document.createElement('canvas');
+      gs.width = W; gs.height = H;
+      const gctx = gs.getContext('2d');
+      const S = this.grain.width;
+      for (let y = 0; y < H; y += S) for (let x = 0; x < W; x += S) gctx.drawImage(this.grain, x, y);
+      this._grainScreen = gs;
+    }
+    const jx = ((game._time * 61) % 8) | 0, jy = ((game._time * 47) % 8) | 0;
+    ctx.drawImage(this._grainScreen, -jx, -jy);
   }
 }
 
@@ -4478,6 +4759,7 @@ class Game {
     this.slowmoT = 0; this.slowmoScale = 1;
     this.lighting = new Lighting();
     this.ambient = new Ambient();
+    this.atmosphere = new Atmosphere(20260707);
     this.lights = [];
     this.floaters = [];
     this.combo = 0; this.comboTimer = 0; this.comboBest = 0;
@@ -4538,8 +4820,11 @@ class Game {
     this.canvas.height = Math.floor(h * dpr);
     this.dpr = dpr;
     this.W = w; this.H = h;
-    this.zoom = clamp(Math.round(h / (TILE * TARGET_TILES_TALL)), 2, 4);
-    this.ctx.imageSmoothingEnabled = false;
+    // fractional zoom: the HD art pipeline is smoothed, so we no longer need
+    // integer pixel scaling
+    this.zoom = clamp(h / (TILE * TARGET_TILES_TALL), 2, 4);
+    this.ctx.imageSmoothingEnabled = true;
+    // default (bilinear) smoothing quality — 'high' is too costly per frame
   }
 
   startGame() {
@@ -4926,9 +5211,10 @@ class Game {
   render() {
     const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
 
-    if (this.state === 'title') { this.menus.drawTitle(ctx, this.W, this.H, this.titleOptions, this.menuIndex); return; }
+
+    if (this.state === 'title') { this.menus.drawTitle(ctx, this.W, this.H, this.titleOptions, this.menuIndex); this.atmosphere.drawPost(ctx, this); return; }
     if (this.state === 'howto' && this.prevState === 'title') { this.menus.drawTitle(ctx, this.W, this.H, this.titleOptions, this.menuIndex); this.menus.drawHowTo(ctx, this.W, this.H); return; }
 
     // world
@@ -4943,7 +5229,7 @@ class Game {
     ctx.save();
     ctx.setTransform(this.zoom * this.dpr, 0, 0, this.zoom * this.dpr, -camX * this.zoom * this.dpr, -camY * this.zoom * this.dpr);
 
-    this.world.drawTerrain(ctx, this.view);
+    this.world.drawTerrain(ctx, this.view, this._time);
     this.ambient.drawWater(ctx, this);
 
     // build y-sorted render list
@@ -4967,6 +5253,7 @@ class Game {
 
     this.particles.draw(ctx);
     this.ambient.drawDay(ctx, this);
+    this.atmosphere.drawClouds(ctx, this); // cloud shadows sweep over everything
 
     // interaction highlight ring
     if (this.currentInteract) {
@@ -4978,10 +5265,11 @@ class Game {
     ctx.restore();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
-    // lighting, fireflies, weather, floating text (all screen space)
+    // lighting, fireflies, weather, cinematic post, floating text (screen space)
     this.lighting.render(ctx, this);
     this.ambient.drawGlow(ctx, this);
     this.weather.render(ctx, this);
+    this.atmosphere.drawPost(ctx, this);
     this._drawFloaters(ctx);
 
     // HUD + overlays
@@ -5021,10 +5309,14 @@ class Game {
   }
 
   _vignette(ctx) {
-    const g = ctx.createRadialGradient(this.W / 2, this.H / 2, this.H * 0.35, this.W / 2, this.H / 2, this.H * 0.75);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, 'rgba(0,0,0,0.35)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, this.W, this.H);
+    if (!this._vigGrad || this._vigW !== this.W || this._vigH !== this.H) {
+      this._vigW = this.W; this._vigH = this.H;
+      const g = ctx.createRadialGradient(this.W / 2, this.H / 2, this.H * 0.35, this.W / 2, this.H / 2, this.H * 0.75);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(0,0,0,0.35)');
+      this._vigGrad = g;
+    }
+    ctx.fillStyle = this._vigGrad; ctx.fillRect(0, 0, this.W, this.H);
   }
 
   /* ---------------- save / load ---------------- */

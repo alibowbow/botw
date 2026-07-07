@@ -66,9 +66,7 @@ class Lighting {
         this._hole(d, toX(g.x), toY(g.y), g.r * z, fl * a);
       }
       d.globalCompositeOperation = 'source-over';
-      ctx.imageSmoothingEnabled = true;
       ctx.drawImage(this.dark, 0, 0, W, H);
-      ctx.imageSmoothingEnabled = false;
     }
 
     // 3) emissive bloom (additive)

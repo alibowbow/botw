@@ -45,10 +45,10 @@ class Ambient {
       if (t.deep || t.solid) continue;
       const flap = Math.abs(Math.sin(c.ph * 4));
       ctx.fillStyle = cols[c.hue];
-      const w = 1.4 + flap * 2.2;
-      ctx.beginPath(); ctx.ellipse(c.x - w, c.y, w, 2.4, 0, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(c.x + w, c.y, w, 2.4, 0, 0, TAU); ctx.fill();
-      ctx.fillStyle = '#2a2320'; ctx.fillRect(c.x - 0.5, c.y - 1.5, 1, 3);
+      const w = 0.9 + flap * 1.4;
+      ctx.beginPath(); ctx.ellipse(c.x - w, c.y, w, 1.6, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(c.x + w, c.y, w, 1.6, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#2a2320'; ctx.fillRect(c.x - 0.4, c.y - 1.1, 0.8, 2.2);
     }
   }
 

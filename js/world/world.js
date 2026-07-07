@@ -167,44 +167,108 @@ class World {
     return hit;
   }
 
-  /* ---------------- rendering ---------------- */
+  /* ---------------- rendering ----------------
+     Terrain is rendered like a tiny fragment shader: one pass per world pixel,
+     baked into per-chunk canvases (built once, cached). Per pixel we compute
+     - a domain-warped tile lookup   -> organic, non-square biome boundaries
+     - bilinear-interpolated elevation -> hillshading (NW sun) for 3D relief
+     - water depth colour + a shoreline foam band (foam points animate later)
+     - fine/medium detail noise      -> ground texture                      */
+  _terrainNoise() {
+    if (!this._nWarpA) {
+      this._nWarpA = new Noise(this.seed ^ 0x137f);
+      this._nWarpB = new Noise(this.seed ^ 0x7c21);
+      this._nDet = new Noise(this.seed ^ 0x3d9a);
+    }
+  }
+  _elevAt(wx, wy) {
+    const W = this.W, H = this.H, elev = this.elevOf;
+    const fx = wx / TILE - 0.5, fy = wy / TILE - 0.5;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const sx = fx - x0, sy = fy - y0;
+    const xa = clamp(x0, 0, W - 1), xb = clamp(x0 + 1, 0, W - 1);
+    const ya = clamp(y0, 0, H - 1), yb = clamp(y0 + 1, 0, H - 1);
+    const e00 = elev[ya * W + xa], e10 = elev[ya * W + xb];
+    const e01 = elev[yb * W + xa], e11 = elev[yb * W + xb];
+    const top = e00 + (e10 - e00) * sx;
+    const bot = e01 + (e11 - e01) * sx;
+    return top + (bot - top) * sy;
+  }
   _buildChunk(ccx, ccy) {
-    const size = CHUNK * TILE;
-    const { c, ctx } = makeCanvas(size, size);
-    const tx0 = ccx * CHUNK, ty0 = ccy * CHUNK;
-    for (let ly = 0; ly < CHUNK; ly++) {
-      for (let lx = 0; lx < CHUNK; lx++) {
-        const tx = tx0 + lx, ty = ty0 + ly;
-        if (!this.inBounds(tx, ty)) { ctx.fillStyle = '#22496a'; ctx.fillRect(lx * TILE, ly * TILE, TILE, TILE); continue; }
-        const t = TILES[this.tiles[ty * this.W + tx]];
-        const h = hash01(tx, ty, this.seed);
-        const b = (h - 0.5) * 2 * t.noise; // brightness variation
-        const base = shade(t.col, b);
-        ctx.fillStyle = css(base);
-        ctx.fillRect(lx * TILE, ly * TILE, TILE, TILE);
-        // speckles
-        const nSp = 3;
-        for (let s = 0; s < nSp; s++) {
-          const hx = hash01(tx * 4 + s, ty * 7 + 1, this.seed);
-          const hy = hash01(tx * 9 + 3, ty * 5 + s, this.seed + 99);
-          ctx.fillStyle = css(shade(t.col2, (hx - 0.5) * 0.2));
-          ctx.globalAlpha = 0.5;
-          ctx.fillRect(lx * TILE + hx * (TILE - 3), ly * TILE + hy * (TILE - 3), 2, 2);
-          ctx.globalAlpha = 1;
+    this._terrainNoise();
+    const size = CHUNK * TILE;                  // 256 world px
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const cctx = c.getContext('2d');
+    const img = cctx.createImageData(size, size);
+    const data = img.data;
+    const W = this.W, H = this.H, tiles = this.tiles;
+    const wx0 = ccx * size, wy0 = ccy * size;
+    const nA = this._nWarpA, nB = this._nWarpB, nD = this._nDet;
+    const HILL = 46;                            // hillshade strength
+    const foam = [];
+    let di = 0;
+    for (let py = 0; py < size; py++) {
+      const wy = wy0 + py + 0.5;
+      for (let px = 0; px < size; px++, di += 4) {
+        const wx = wx0 + px + 0.5;
+        // organic biome boundary: look the tile up at a noise-warped position
+        const warpX = nA.value(wx * 0.055, wy * 0.055) * 6;
+        const warpY = nB.value(wx * 0.055, wy * 0.055) * 6;
+        let tx = ((wx + warpX) / TILE) | 0, ty = ((wy + warpY) / TILE) | 0;
+        tx = tx < 0 ? 0 : (tx >= W ? W - 1 : tx);
+        ty = ty < 0 ? 0 : (ty >= H ? H - 1 : ty);
+        const ti = TILES[tiles[ty * W + tx]];
+        const e = this._elevAt(wx, wy);
+        const nF = nD.value(wx * 0.34, wy * 0.34);            // fine texture
+        const nM = nD.value(wx * 0.06 + 91.7, wy * 0.06);     // medium patches
+        let r, g, b;
+        if (ti.deep || ti.shallow) {
+          // depth gradient: dark abyss -> bright turquoise shallows
+          const depth = clamp(invlerp(0.10, 0.36, e), 0, 1);
+          const wave = nF * 0.5 + nM * 0.5;
+          r = 14 + depth * 62 + wave * 10;
+          g = 40 + depth * 106 + wave * 14;
+          b = 92 + depth * 116 + wave * 15;
+          // shoreline foam band
+          const foamT = invlerp(0.328, 0.356, e);
+          if (foamT > 0) {
+            const f = clamp(foamT, 0, 1) * (0.5 + 0.5 * clamp(nF + 0.4, 0, 1));
+            r += (238 - r) * f; g += (246 - g) * f; b += (250 - b) * f;
+            if (foamT > 0.55 && ((px + py * 3) % 9) === 0 && foam.length < 320) foam.push(wx0 + px, wy0 + py);
+          }
+        } else {
+          const base = ti.col, alt = ti.col2;
+          let mixT = 0.5 + nM * 0.42 + nF * 0.28;
+          if (ti.climb) mixT = 0.5 + nF * 0.9;                // rocky striations
+          mixT = mixT < 0 ? 0 : (mixT > 1 ? 1 : mixT);
+          if (ti.id === T.FLOWERS) mixT *= 0.3;               // pink stays a hint; sprites carry the colour
+          r = base.r + (alt.r - base.r) * mixT;
+          g = base.g + (alt.g - base.g) * mixT;
+          b = base.b + (alt.b - base.b) * mixT;
+          // hillshade: light from the north-west
+          const eR = this._elevAt(wx + 2.5, wy);
+          const eD = this._elevAt(wx, wy + 2.5);
+          let sh = 1 + ((e - eR) + (e - eD)) * HILL;
+          if (ti.climb) sh = sh * 1.12 - 0.14;                // cliffs pop harder
+          sh = sh < 0.55 ? 0.55 : (sh > 1.4 ? 1.4 : sh);
+          r *= sh; g *= sh; b *= sh;
+          // wet sand darkening right at the waterline
+          if (!ti.cold && e < 0.375 && e >= 0.35) {
+            const wet = invlerp(0.375, 0.35, e) * 0.22;
+            r *= 1 - wet; g *= 1 - wet; b *= 1 - wet * 0.6;
+          }
+          // snow sparkle
+          if (ti.cold && nF > 0.62) { r += 22; g += 22; b += 26; }
         }
-        // water: horizontal light bands; cliff: vertical shade
-        if (t.deep || t.shallow) {
-          ctx.fillStyle = css(shade(t.col2, 0.15), 0.35);
-          if (((tx * 3 + ty * 5) & 3) === 0) ctx.fillRect(lx * TILE + 2, ly * TILE + 5, TILE - 5, 1.5);
-        } else if (t.climb) {
-          ctx.fillStyle = css(shade(t.col, -0.35), 0.5);
-          ctx.fillRect(lx * TILE, ly * TILE, 2, TILE);
-          ctx.fillStyle = css(shade(t.col, 0.2), 0.4);
-          ctx.fillRect(lx * TILE + TILE - 3, ly * TILE + 2, 2, TILE - 4);
-        }
+        data[di] = r > 255 ? 255 : r;
+        data[di + 1] = g > 255 ? 255 : g;
+        data[di + 2] = b > 255 ? 255 : b;
+        data[di + 3] = 255;
       }
     }
-    return c;
+    cctx.putImageData(img, 0, 0);
+    return { canvas: c, foam };
   }
   _getChunk(ccx, ccy) {
     const key = ccx + ',' + ccy;
@@ -212,16 +276,38 @@ class World {
     if (!c) { c = this._buildChunk(ccx, ccy); this._chunks.set(key, c); }
     return c;
   }
-  drawTerrain(ctx, view) {
+  drawTerrain(ctx, view, time) {
     const size = CHUNK * TILE;
     const c0 = Math.floor(view.x / size), c1 = Math.floor((view.x + view.w) / size);
     const r0 = Math.floor(view.y / size), r1 = Math.floor((view.y + view.h) / size);
     const maxCX = Math.ceil(this.pxW / size) - 1, maxCY = Math.ceil(this.pxH / size) - 1;
+    const t = time || 0;
+    // prewarm: bake at most one just-off-screen chunk per frame, so walking
+    // across a chunk boundary never has to build several at once
+    outer: for (let cy = r0 - 1; cy <= r1 + 1; cy++) {
+      for (let cx = c0 - 1; cx <= c1 + 1; cx++) {
+        if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
+        if (cy >= r0 && cy <= r1 && cx >= c0 && cx <= c1) continue; // visible: built below anyway
+        if (!this._chunks.has(cx + ',' + cy)) { this._getChunk(cx, cy); break outer; }
+      }
+    }
     for (let cy = r0; cy <= r1; cy++) {
       for (let cx = c0; cx <= c1; cx++) {
         if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
         const chunk = this._getChunk(cx, cy);
-        ctx.drawImage(chunk, cx * size, cy * size);
+        ctx.drawImage(chunk.canvas, cx * size, cy * size);
+        // animated surf: foam points twinkle along the shoreline. Constant
+        // alpha + visibility pulsing keeps this a cheap batched pass.
+        const foam = chunk.foam;
+        if (foam.length) {
+          ctx.fillStyle = 'rgba(240,250,255,0.55)';
+          ctx.beginPath();
+          for (let i = 0; i < foam.length; i += 2) {
+            const fx = foam[i], fy = foam[i + 1];
+            if (Math.sin(t * 2.1 + fx * 0.09 + fy * 0.07) > -0.15) ctx.rect(fx, fy, 1.6, 1.2);
+          }
+          ctx.fill();
+        }
       }
     }
   }
@@ -246,12 +332,11 @@ class World {
     else if (o.type === 'korokRock') name = 'rock';
     const cv = sb.variant(name, o.v || 0) || sb.variant('rock', 0);
     if (!cv) return;
-    // shadow for solid/tall objects
+    const lw = cv._lw || cv.width, lh = cv._lh || cv.height;
+    // soft blob shadow for solid/tall objects
     if (o.solid || o.type === 'campfire' || o.type === 'korokRock') {
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx.beginPath();
-      ctx.ellipse(o.x, o.y + 1, (o.r || 6) * 1.2, (o.r || 6) * 0.55, 0, 0, TAU);
-      ctx.fill();
+      const sr = (o.r || 6) * 1.6;
+      ctx.drawImage(sb.shadow, o.x - sr, o.y + 1 - sr * 0.42, sr * 2, sr * 0.84);
     }
     // gentle wind sway for foliage (skew the top of the sprite)
     const sways = (o.type === 'grass' || o.type === 'flower' || o.type === 'bush' || o.type === 'tree' || o.type === 'pine');
@@ -261,7 +346,7 @@ class World {
       ctx.save();
       ctx.translate(o.x, o.y);
       ctx.transform(1, 0, sw, 1, 0, 0); // horizontal shear grows toward the top
-      ctx.drawImage(cv, Math.round(-cv.width / 2), Math.round(-cv._feetY));
+      ctx.drawImage(cv, -lw / 2, -cv._feetY, lw, lh);
       ctx.restore();
       if (o.type === 'korokRock' && !o.done) {
         ctx.fillStyle = '#4f8a3f';
@@ -269,7 +354,7 @@ class World {
       }
       return;
     }
-    ctx.drawImage(cv, Math.round(o.x - cv.width / 2), Math.round(o.y - cv._feetY));
+    ctx.drawImage(cv, o.x - lw / 2, o.y - cv._feetY, lw, lh);
     // korok leaf hint on the rock
     if (o.type === 'korokRock' && !o.done) {
       ctx.fillStyle = '#4f8a3f';
