@@ -1852,25 +1852,51 @@ class World {
     if (!c) { c = this._buildChunk(ccx, ccy); this._chunks.set(key, c); }
     return c;
   }
+  // Synchronously bake every chunk touching a world-px rect. Called at world
+  // creation / game start / respawn — moments where a one-time cost is hidden.
+  prebuildArea(x0, y0, x1, y1) {
+    const size = CHUNK * TILE;
+    const maxCX = Math.ceil(this.pxW / size) - 1, maxCY = Math.ceil(this.pxH / size) - 1;
+    for (let cy = Math.max(0, Math.floor(y0 / size)); cy <= Math.min(maxCY, Math.floor(y1 / size)); cy++)
+      for (let cx = Math.max(0, Math.floor(x0 / size)); cx <= Math.min(maxCX, Math.floor(x1 / size)); cx++)
+        this._getChunk(cx, cy);
+  }
+  // Cheap flat stand-in colour for a chunk that hasn't been baked yet.
+  _placeholderColor(ccx, ccy) {
+    if (!this._phCols) this._phCols = new Map();
+    const key = ccx + ',' + ccy;
+    let col = this._phCols.get(key);
+    if (!col) {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let sy = 0; sy < 3; sy++) for (let sx = 0; sx < 3; sx++) {
+        const tx = clamp(ccx * CHUNK + 2 + sx * 5, 0, this.W - 1);
+        const ty = clamp(ccy * CHUNK + 2 + sy * 5, 0, this.H - 1);
+        const c = TILES[this.tiles[ty * this.W + tx]].col;
+        r += c.r; g += c.g; b += c.b; n++;
+      }
+      col = rgb(r / n, g / n, b / n);
+      this._phCols.set(key, col);
+    }
+    return col;
+  }
   drawTerrain(ctx, view, time) {
     const size = CHUNK * TILE;
     const c0 = Math.floor(view.x / size), c1 = Math.floor((view.x + view.w) / size);
     const r0 = Math.floor(view.y / size), r1 = Math.floor((view.y + view.h) / size);
     const maxCX = Math.ceil(this.pxW / size) - 1, maxCY = Math.ceil(this.pxH / size) - 1;
     const t = time || 0;
-    // prewarm: bake at most one just-off-screen chunk per frame, so walking
-    // across a chunk boundary never has to build several at once
-    outer: for (let cy = r0 - 1; cy <= r1 + 1; cy++) {
-      for (let cx = c0 - 1; cx <= c1 + 1; cx++) {
-        if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
-        if (cy >= r0 && cy <= r1 && cx >= c0 && cx <= c1) continue; // visible: built below anyway
-        if (!this._chunks.has(cx + ',' + cy)) { this._getChunk(cx, cy); break outer; }
-      }
-    }
+    // Budgeted baking: at most 2 chunk builds per frame. Missing visible
+    // chunks beyond the budget get a flat placeholder for a frame or two, so
+    // teleports/fast pans never stack multi-chunk bakes into one frame.
+    let budget = 2;
     for (let cy = r0; cy <= r1; cy++) {
       for (let cx = c0; cx <= c1; cx++) {
         if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
-        const chunk = this._getChunk(cx, cy);
+        let chunk = this._chunks.get(cx + ',' + cy);
+        if (!chunk) {
+          if (budget > 0) { budget--; chunk = this._getChunk(cx, cy); }
+          else { ctx.fillStyle = this._placeholderColor(cx, cy); ctx.fillRect(cx * size, cy * size, size, size); continue; }
+        }
         ctx.drawImage(chunk.canvas, cx * size, cy * size);
         // animated surf: foam points twinkle along the shoreline. Constant
         // alpha + visibility pulsing keeps this a cheap batched pass.
@@ -1886,9 +1912,20 @@ class World {
         }
       }
     }
+    // prewarm: with leftover budget, bake one just-off-screen chunk so walking
+    // across a boundary is always ready ahead of time
+    if (budget > 0) {
+      outer: for (let cy = r0 - 1; cy <= r1 + 1; cy++) {
+        for (let cx = c0 - 1; cx <= c1 + 1; cx++) {
+          if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
+          if (cy >= r0 && cy <= r1 && cx >= c0 && cx <= c1) continue;
+          if (!this._chunks.has(cx + ',' + cy)) { this._getChunk(cx, cy); break outer; }
+        }
+      }
+    }
   }
 
-  // Push visible objects into arr as render entries {y, kind:'obj', o}.
+  // Push visible objects into arr as render entries {y, kind:'obj', o};
   collectVisibleObjects(view, arr) {
     // Objects are drawn upward from their feet, so a tall sprite (the 96px tower)
     // can still be on-screen when its feet are well below the view. Pad enough to
@@ -4014,14 +4051,17 @@ class Atmosphere {
     const ctx = c.getContext('2d');
     const img = ctx.createImageData(S, S);
     const d = img.data;
+    const k = 0.028;
+    const val = (xx, yy) => n.fbm01(xx * k, yy * k, 3, 2, 0.55);
     let i = 0;
     for (let y = 0; y < S; y++) {
+      const sy = smoothstep(y / S), iy = 1 - sy;
       for (let x = 0; x < S; x++, i += 4) {
-        // tileable-ish: sample noise on a torus via two offset reads blended
-        const fx = x / S, fy = y / S;
-        const a = n.fbm01(x * 0.028, y * 0.028, 3, 2, 0.55);
-        const b2 = n.fbm01((x - S) * 0.028, (y - S) * 0.028, 3, 2, 0.55);
-        const v = lerp(a, b2, smoothstep(Math.max(fx, fy)));
+        // truly toroidal: blend the four wrapped samples with bilinear weights
+        // so opposite edges match exactly and tiling shows no seams
+        const sx = smoothstep(x / S), ix = 1 - sx;
+        const v = val(x, y) * ix * iy + val(x - S, y) * sx * iy +
+                  val(x, y - S) * ix * sy + val(x - S, y - S) * sx * sy;
         const alpha = smoothstep(invlerp(0.52, 0.8, v));
         d[i] = 30; d[i + 1] = 38; d[i + 2] = 58;
         d[i + 3] = alpha * 255;
@@ -4120,10 +4160,11 @@ class Atmosphere {
     if (!this._grainScreen || this._gw !== W || this._gh !== H) {
       this._gw = W; this._gh = H;
       const gs = document.createElement('canvas');
-      gs.width = W; gs.height = H;
+      // overscan by the jitter range so the shifting draw always covers the screen
+      gs.width = W + 8; gs.height = H + 8;
       const gctx = gs.getContext('2d');
       const S = this.grain.width;
-      for (let y = 0; y < H; y += S) for (let x = 0; x < W; x += S) gctx.drawImage(this.grain, x, y);
+      for (let y = 0; y < H + 8; y += S) for (let x = 0; x < W + 8; x += S) gctx.drawImage(this.grain, x, y);
       this._grainScreen = gs;
     }
     const jx = ((game._time * 61) % 8) | 0, jy = ((game._time * 47) % 8) | 0;
@@ -4802,6 +4843,14 @@ class Game {
     this._giveStarterKit();
     if (tryLoad) this._load(seed);
     this._centerCamera();
+    this._prebakeView();
+  }
+
+  // Bake the chunks around the current camera synchronously (called behind the
+  // loading screen / respawn fade, where a one-time cost is invisible).
+  _prebakeView() {
+    const vw = this.W / this.zoom, vh = this.H / this.zoom;
+    this.world.prebuildArea(this.camera.x - 260, this.camera.y - 260, this.camera.x + vw + 260, this.camera.y + vh + 260);
   }
 
   _giveStarterKit() {
@@ -5181,6 +5230,10 @@ class Game {
       // clear immediate threats
       const p = this.player;
       this.enemies = this.enemies.filter(e => dist(e.x, e.y, p.x, p.y) > 120);
+      // cut, don't pan: a cross-map respawn should never sweep the camera
+      // through unbuilt chunks
+      this._centerCamera();
+      this._prebakeView();
       this.state = 'playing';
       this.toast('Rescued! Be careful out there.');
     }
@@ -5222,8 +5275,11 @@ class Game {
     const shake = this.shakeAmt;
     const sx = shake > 0.2 ? (Math.random() * 2 - 1) * shake : 0;
     const sy = shake > 0.2 ? (Math.random() * 2 - 1) * shake : 0;
-    const camX = Math.round(this.camera.x - sx), camY = Math.round(this.camera.y - sy);
     const vw = this.W / this.zoom, vh = this.H / this.zoom;
+    // clamp the rounded camera so the view never pokes past the world edge
+    // (fractional zoom + rounding could otherwise expose a background hairline)
+    const camX = clamp(Math.round(this.camera.x - sx), 0, Math.max(0, Math.floor(this.world.pxW - vw)));
+    const camY = clamp(Math.round(this.camera.y - sy), 0, Math.max(0, Math.floor(this.world.pxH - vh)));
     this.view.x = camX; this.view.y = camY; this.view.w = vw; this.view.h = vh;
 
     ctx.save();

@@ -17,14 +17,17 @@ class Atmosphere {
     const ctx = c.getContext('2d');
     const img = ctx.createImageData(S, S);
     const d = img.data;
+    const k = 0.028;
+    const val = (xx, yy) => n.fbm01(xx * k, yy * k, 3, 2, 0.55);
     let i = 0;
     for (let y = 0; y < S; y++) {
+      const sy = smoothstep(y / S), iy = 1 - sy;
       for (let x = 0; x < S; x++, i += 4) {
-        // tileable-ish: sample noise on a torus via two offset reads blended
-        const fx = x / S, fy = y / S;
-        const a = n.fbm01(x * 0.028, y * 0.028, 3, 2, 0.55);
-        const b2 = n.fbm01((x - S) * 0.028, (y - S) * 0.028, 3, 2, 0.55);
-        const v = lerp(a, b2, smoothstep(Math.max(fx, fy)));
+        // truly toroidal: blend the four wrapped samples with bilinear weights
+        // so opposite edges match exactly and tiling shows no seams
+        const sx = smoothstep(x / S), ix = 1 - sx;
+        const v = val(x, y) * ix * iy + val(x - S, y) * sx * iy +
+                  val(x, y - S) * ix * sy + val(x - S, y - S) * sx * sy;
         const alpha = smoothstep(invlerp(0.52, 0.8, v));
         d[i] = 30; d[i + 1] = 38; d[i + 2] = 58;
         d[i + 3] = alpha * 255;
@@ -123,10 +126,11 @@ class Atmosphere {
     if (!this._grainScreen || this._gw !== W || this._gh !== H) {
       this._gw = W; this._gh = H;
       const gs = document.createElement('canvas');
-      gs.width = W; gs.height = H;
+      // overscan by the jitter range so the shifting draw always covers the screen
+      gs.width = W + 8; gs.height = H + 8;
       const gctx = gs.getContext('2d');
       const S = this.grain.width;
-      for (let y = 0; y < H; y += S) for (let x = 0; x < W; x += S) gctx.drawImage(this.grain, x, y);
+      for (let y = 0; y < H + 8; y += S) for (let x = 0; x < W + 8; x += S) gctx.drawImage(this.grain, x, y);
       this._grainScreen = gs;
     }
     const jx = ((game._time * 61) % 8) | 0, jy = ((game._time * 47) % 8) | 0;

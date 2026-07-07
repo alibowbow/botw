@@ -85,6 +85,14 @@ class Game {
     this._giveStarterKit();
     if (tryLoad) this._load(seed);
     this._centerCamera();
+    this._prebakeView();
+  }
+
+  // Bake the chunks around the current camera synchronously (called behind the
+  // loading screen / respawn fade, where a one-time cost is invisible).
+  _prebakeView() {
+    const vw = this.W / this.zoom, vh = this.H / this.zoom;
+    this.world.prebuildArea(this.camera.x - 260, this.camera.y - 260, this.camera.x + vw + 260, this.camera.y + vh + 260);
   }
 
   _giveStarterKit() {
@@ -464,6 +472,10 @@ class Game {
       // clear immediate threats
       const p = this.player;
       this.enemies = this.enemies.filter(e => dist(e.x, e.y, p.x, p.y) > 120);
+      // cut, don't pan: a cross-map respawn should never sweep the camera
+      // through unbuilt chunks
+      this._centerCamera();
+      this._prebakeView();
       this.state = 'playing';
       this.toast('Rescued! Be careful out there.');
     }
@@ -505,8 +517,11 @@ class Game {
     const shake = this.shakeAmt;
     const sx = shake > 0.2 ? (Math.random() * 2 - 1) * shake : 0;
     const sy = shake > 0.2 ? (Math.random() * 2 - 1) * shake : 0;
-    const camX = Math.round(this.camera.x - sx), camY = Math.round(this.camera.y - sy);
     const vw = this.W / this.zoom, vh = this.H / this.zoom;
+    // clamp the rounded camera so the view never pokes past the world edge
+    // (fractional zoom + rounding could otherwise expose a background hairline)
+    const camX = clamp(Math.round(this.camera.x - sx), 0, Math.max(0, Math.floor(this.world.pxW - vw)));
+    const camY = clamp(Math.round(this.camera.y - sy), 0, Math.max(0, Math.floor(this.world.pxH - vh)));
     this.view.x = camX; this.view.y = camY; this.view.w = vw; this.view.h = vh;
 
     ctx.save();

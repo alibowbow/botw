@@ -276,25 +276,51 @@ class World {
     if (!c) { c = this._buildChunk(ccx, ccy); this._chunks.set(key, c); }
     return c;
   }
+  // Synchronously bake every chunk touching a world-px rect. Called at world
+  // creation / game start / respawn — moments where a one-time cost is hidden.
+  prebuildArea(x0, y0, x1, y1) {
+    const size = CHUNK * TILE;
+    const maxCX = Math.ceil(this.pxW / size) - 1, maxCY = Math.ceil(this.pxH / size) - 1;
+    for (let cy = Math.max(0, Math.floor(y0 / size)); cy <= Math.min(maxCY, Math.floor(y1 / size)); cy++)
+      for (let cx = Math.max(0, Math.floor(x0 / size)); cx <= Math.min(maxCX, Math.floor(x1 / size)); cx++)
+        this._getChunk(cx, cy);
+  }
+  // Cheap flat stand-in colour for a chunk that hasn't been baked yet.
+  _placeholderColor(ccx, ccy) {
+    if (!this._phCols) this._phCols = new Map();
+    const key = ccx + ',' + ccy;
+    let col = this._phCols.get(key);
+    if (!col) {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let sy = 0; sy < 3; sy++) for (let sx = 0; sx < 3; sx++) {
+        const tx = clamp(ccx * CHUNK + 2 + sx * 5, 0, this.W - 1);
+        const ty = clamp(ccy * CHUNK + 2 + sy * 5, 0, this.H - 1);
+        const c = TILES[this.tiles[ty * this.W + tx]].col;
+        r += c.r; g += c.g; b += c.b; n++;
+      }
+      col = rgb(r / n, g / n, b / n);
+      this._phCols.set(key, col);
+    }
+    return col;
+  }
   drawTerrain(ctx, view, time) {
     const size = CHUNK * TILE;
     const c0 = Math.floor(view.x / size), c1 = Math.floor((view.x + view.w) / size);
     const r0 = Math.floor(view.y / size), r1 = Math.floor((view.y + view.h) / size);
     const maxCX = Math.ceil(this.pxW / size) - 1, maxCY = Math.ceil(this.pxH / size) - 1;
     const t = time || 0;
-    // prewarm: bake at most one just-off-screen chunk per frame, so walking
-    // across a chunk boundary never has to build several at once
-    outer: for (let cy = r0 - 1; cy <= r1 + 1; cy++) {
-      for (let cx = c0 - 1; cx <= c1 + 1; cx++) {
-        if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
-        if (cy >= r0 && cy <= r1 && cx >= c0 && cx <= c1) continue; // visible: built below anyway
-        if (!this._chunks.has(cx + ',' + cy)) { this._getChunk(cx, cy); break outer; }
-      }
-    }
+    // Budgeted baking: at most 2 chunk builds per frame. Missing visible
+    // chunks beyond the budget get a flat placeholder for a frame or two, so
+    // teleports/fast pans never stack multi-chunk bakes into one frame.
+    let budget = 2;
     for (let cy = r0; cy <= r1; cy++) {
       for (let cx = c0; cx <= c1; cx++) {
         if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
-        const chunk = this._getChunk(cx, cy);
+        let chunk = this._chunks.get(cx + ',' + cy);
+        if (!chunk) {
+          if (budget > 0) { budget--; chunk = this._getChunk(cx, cy); }
+          else { ctx.fillStyle = this._placeholderColor(cx, cy); ctx.fillRect(cx * size, cy * size, size, size); continue; }
+        }
         ctx.drawImage(chunk.canvas, cx * size, cy * size);
         // animated surf: foam points twinkle along the shoreline. Constant
         // alpha + visibility pulsing keeps this a cheap batched pass.
@@ -310,9 +336,20 @@ class World {
         }
       }
     }
+    // prewarm: with leftover budget, bake one just-off-screen chunk so walking
+    // across a boundary is always ready ahead of time
+    if (budget > 0) {
+      outer: for (let cy = r0 - 1; cy <= r1 + 1; cy++) {
+        for (let cx = c0 - 1; cx <= c1 + 1; cx++) {
+          if (cx < 0 || cy < 0 || cx > maxCX || cy > maxCY) continue;
+          if (cy >= r0 && cy <= r1 && cx >= c0 && cx <= c1) continue;
+          if (!this._chunks.has(cx + ',' + cy)) { this._getChunk(cx, cy); break outer; }
+        }
+      }
+    }
   }
 
-  // Push visible objects into arr as render entries {y, kind:'obj', o}.
+  // Push visible objects into arr as render entries {y, kind:'obj', o};
   collectVisibleObjects(view, arr) {
     // Objects are drawn upward from their feet, so a tall sprite (the 96px tower)
     // can still be on-screen when its feet are well below the view. Pad enough to
